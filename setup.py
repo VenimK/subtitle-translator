@@ -21,6 +21,9 @@ setup(
         'console_scripts': [
             'subtitle-translator=subtitle_translator.cli.main:main',
         ],
+        'gui_scripts': [
+            'subtitle-translator-gui=subtitle_translator.gui.main:main',
+        ],
     },
     python_requires='>=3.8',
 )

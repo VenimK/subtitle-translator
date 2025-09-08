@@ -49,8 +49,15 @@ subtitle-translator translate input.srt --source-lang eng --target-lang spa --ba
 
 ### Graphical User Interface (GUI)
 
+After installation, you can launch the GUI with:
+
 ```bash
-subtitle-translator gui
+subtitle-translator-gui
+```
+
+Or if you're in development mode:
+```bash
+python -m subtitle_translator.gui.main
 ```
 
 ## Configuration

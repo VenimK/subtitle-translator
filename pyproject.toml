@@ -37,6 +37,9 @@ dev = [
 [project.scripts]
 subtitle-translator = "subtitle_translator.cli.main:main"
 
+[project.gui-scripts]
+subtitle-translator-gui = "subtitle_translator.gui.main:main"
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["subtitle_translator*"]

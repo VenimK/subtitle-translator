@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 class TranslationConfig:
     """Configuration for subtitle translation."""
     translator_type: str = "local_nllb"
-    endpoint: str = "https://check.nas86.eu/"
+    endpoint: str = "http://localhost:6060"  # Default local NLLB server
     api_key: Optional[str] = None
     batch_size: int = 5
     source_language: str = "eng_Latn"
@@ -82,17 +82,95 @@ class Translator:
             # Detect the language
             lang = detect(text)
             
-            # Map to NLLB language codes (this is a simplified mapping)
+            # Map to NLLB language codes (ISO 639-1 to NLLB format)
             lang_map = {
-                'en': 'eng_Latn',
-                'nl': 'nld_Latn',
-                'fr': 'fra_Latn',
-                'de': 'deu_Latn',
-                'es': 'spa_Latn',
-                # Add more mappings as needed
+                # Major European languages
+                'en': 'eng_Latn',  # English
+                'es': 'spa_Latn',  # Spanish
+                'fr': 'fra_Latn',  # French
+                'de': 'deu_Latn',  # German
+                'it': 'ita_Latn',  # Italian
+                'pt': 'por_Latn',  # Portuguese
+                'ru': 'rus_Cyrl',  # Russian
+                'nl': 'nld_Latn',  # Dutch
+                'pl': 'pol_Latn',  # Polish
+                'uk': 'ukr_Cyrl',  # Ukrainian
+                'tr': 'tur_Latn',  # Turkish
+                'ar': 'arb_Arab',  # Arabic
+                'zh': 'zho_Hans',  # Chinese Simplified
+                'zh-tw': 'zho_Hant',  # Chinese Traditional
+                'ja': 'jpn_Jpan',  # Japanese
+                'ko': 'kor_Hang',  # Korean
+                'hi': 'hin_Deva',  # Hindi
+                'bn': 'ben_Beng',  # Bengali
+                'pa': 'pan_Guru',  # Punjabi
+                'ta': 'tam_Taml',  # Tamil
+                'te': 'tel_Telu',  # Telugu
+                'mr': 'mar_Deva',  # Marathi
+                'vi': 'vie_Latn',  # Vietnamese
+                'th': 'tha_Thai',  # Thai
+                'id': 'ind_Latn',  # Indonesian
+                'ms': 'zsm_Latn',  # Malay
+                'fil': 'tgl_Latn',  # Filipino
+                'sw': 'swh_Latn',  # Swahili
+                'ha': 'hau_Latn',  # Hausa
+                'yo': 'yor_Latn',  # Yoruba
+                'ig': 'ibo_Latn',  # Igbo
+                'am': 'amh_Ethi',  # Amharic
+                'zu': 'zul_Latn',  # Zulu
+                'xh': 'xho_Latn',  # Xhosa
+                'st': 'sot_Latn',  # Southern Sotho
+                'tn': 'tsn_Latn',  # Tswana
+                'sn': 'sna_Latn',  # Shona
+                'rw': 'kin_Latn',  # Kinyarwanda
+                'mg': 'plt_Latn',  # Malagasy
+                'so': 'som_Latn',  # Somali
+                'om': 'gaz_Latn',  # Oromo
+                'ti': 'tir_Ethi',  # Tigrinya
+                'he': 'heb_Hebr',  # Hebrew
+                'fa': 'pes_Arab',  # Persian
+                'ur': 'urd_Arab',  # Urdu
+                'ps': 'pbt_Arab',  # Pashto
+                'ku': 'kmr_Latn',  # Kurdish (Kurmanji)
+                'ckb': 'ckb_Arab',  # Central Kurdish
+                'ne': 'npi_Deva',  # Nepali
+                'si': 'sin_Sinh',  # Sinhala
+                'km': 'khm_Khmr',  # Khmer
+                'lo': 'lao_Laoo',  # Lao
+                'my': 'mya_Mymr',  # Burmese
+                'ka': 'kat_Geor',  # Georgian
+                'hy': 'hye_Armn',  # Armenian
+                'az': 'azj_Latn',  # Azerbaijani
+                'uz': 'uzn_Latn',  # Uzbek
+                'kk': 'kaz_Cyrl',  # Kazakh
+                'ky': 'kir_Cyrl',  # Kyrgyz
+                'tg': 'tgk_Cyrl',  # Tajik
+                'tk': 'tuk_Latn',  # Turkmen
+                'mn': 'khk_Cyrl',  # Mongolian
+                'bo': 'bod_Tibt',  # Tibetan
+                'dz': 'dzo_Tibt',  # Dzongkha
+                'ceb': 'ceb_Latn',  # Cebuano
+                'jv': 'jav_Latn',  # Javanese
+                'su': 'sun_Latn',  # Sundanese
+                'ml': 'mal_Mlym',  # Malayalam
+                'kn': 'kan_Knda',  # Kannada
+                'gu': 'guj_Gujr',  # Gujarati
+                'or': 'ory_Orya',  # Odia
+                'as': 'asm_Beng',  # Assamese
+                'mai': 'mai_Deva',  # Maithili
+                'sd': 'snd_Arab',  # Sindhi
+                'pa': 'pan_Guru',  # Punjabi (Gurmukhi)
+                'si': 'sin_Sinh',  # Sinhala
+                'my': 'mya_Mymr',  # Burmese
+                'km': 'khm_Khmr',  # Khmer
+                'lo': 'lao_Laoo',  # Lao
+                'th': 'tha_Thai',  # Thai
+                'bo': 'bod_Tibt',  # Tibetan
+                'dz': 'dzo_Tibt',  # Dzongkha
             }
             
-            return lang_map.get(lang, 'eng_Latn')  # Default to English
+            # Return the mapped language or default to English if not found
+            return lang_map.get(lang, 'eng_Latn')
             
         except Exception as e:
             logger.warning(f"Language detection failed for {file_path}: {e}. Defaulting to English.")

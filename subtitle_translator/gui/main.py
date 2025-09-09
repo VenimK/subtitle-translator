@@ -7,13 +7,15 @@ import sys
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
+# Core Qt imports
 from PyQt6.QtCore import (
-    Qt, QSize, QThread, pyqtSignal, pyqtSlot, QObject, QTimer, QSettings, QDateTime
+    Qt, QSize, QThread, pyqtSignal, pyqtSlot, QObject, QTimer, QSettings, 
+    QDateTime, QVariantAnimation, QCoreApplication, QEvent, QMimeData, QUrl
 )
 from PyQt6.QtGui import (
     QAction, QIcon, QFont, QDragEnterEvent, QDropEvent, QStandardItemModel,
     QStandardItem, QTextCursor, QPixmap, QFontMetrics, QPalette, QColor,
-    QGuiApplication, QFontDatabase
+    QGuiApplication, QFontDatabase, QPainter
 )
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
@@ -31,9 +33,7 @@ from .. import __version__
 
 logger = logging.getLogger(__name__)
 
-# Enable high DPI scaling
-os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
-os.environ["QT_SCALE_FACTOR_ROUNDING_POLICY"] = "PassThrough"
+# High DPI scaling is now handled by Qt attributes
 
 # Set the application style
 def set_application_style(app):
@@ -199,6 +199,15 @@ class MainWindow(QMainWindow):
         self.translation_worker = None
         self.translation_thread = None
         self.current_files = []
+        self._is_busy = False
+        
+        # Animation for busy state
+        self.busy_animation = QVariantAnimation(self)
+        self.busy_animation.setStartValue(0)
+        self.busy_animation.setEndValue(100)
+        self.busy_animation.setDuration(1000)
+        self.busy_animation.setLoopCount(-1)  # Infinite loop
+        self.busy_animation.valueChanged.connect(self._update_busy_animation)
         
         self.init_ui()
         self.load_settings()
@@ -215,6 +224,26 @@ class MainWindow(QMainWindow):
         main_layout = QVBoxLayout(central_widget)
         main_layout.setContentsMargins(10, 10, 10, 10)
         main_layout.setSpacing(10)
+        
+        # Add overlay for busy state
+        self.overlay = QWidget(central_widget)
+        self.overlay.setStyleSheet("background-color: rgba(0, 0, 0, 100);")
+        self.overlay.hide()
+        self.overlay.setGeometry(0, 0, self.width(), self.height())
+        
+        # Add spinner for busy state
+        self.spinner = QLabel(self.overlay)
+        self.spinner.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.spinner.setStyleSheet("""
+            QLabel {
+                color: white;
+                font-size: 16px;
+                background-color: rgba(50, 50, 50, 200);
+                border-radius: 10px;
+                padding: 20px;
+            }
+        """)
+        self.spinner.hide()
         
         self.create_toolbar()
         
@@ -477,6 +506,41 @@ class MainWindow(QMainWindow):
         
         self.config.save()
     
+    def set_busy(self, busy: bool, message: str = "Processing..."):
+        """Set the application's busy state."""
+        self._is_busy = busy
+        self.setEnabled(not busy)
+        
+        if busy:
+            self.overlay.raise_()
+            self.overlay.show()
+            self.spinner.setText(message)
+            self.spinner.show()
+            self.busy_animation.start()
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        else:
+            self.overlay.hide()
+            self.spinner.hide()
+            self.busy_animation.stop()
+            QApplication.restoreOverrideCursor()
+    
+    def _update_busy_animation(self, value):
+        """Update the busy animation."""
+        if not self._is_busy:
+            return
+            
+        # Update spinner text with ellipsis animation
+        text = self.spinner.text().strip('.')
+        dots = '.' * ((value // 20) % 4)
+        self.spinner.setText(f"{text}{dots}")
+        
+        # Update overlay size if window was resized
+        self.overlay.setGeometry(0, 0, self.width(), self.height())
+        self.spinner.move(
+            (self.width() - self.spinner.width()) // 2,
+            (self.height() - self.spinner.height()) // 2
+        )
+    
     def init_translator(self):
         """Initialize the translator with current settings."""
         try:
@@ -548,6 +612,9 @@ class MainWindow(QMainWindow):
     
     def start_translation(self):
         """Start the translation process."""
+        if self._is_busy:
+            return
+            
         if self.file_list.count() == 0:
             QMessageBox.warning(self, "No Files", "Please add files to translate.")
             return
@@ -557,24 +624,45 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Invalid Directory", "Please select a valid output directory.")
             return
         
+        try:
+            output_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Cannot create output directory: {e}")
+            return
+        
         self.save_settings()
         
         files = [Path(self.file_list.item(i).data(Qt.ItemDataRole.UserRole)) for i in range(self.file_list.count())]
         
-        self.translate_btn.setEnabled(False)
+        # Clear previous state
         self.progress_bar.setValue(0)
         self.log_edit.clear()
         
+        # Set up worker and thread
         self.translation_worker = TranslationWorker(self.translator, files, output_dir)
         self.translation_thread = QThread()
         self.translation_worker.moveToThread(self.translation_thread)
         
+        # Connect signals
         self.translation_worker.log_message.connect(self.log)
         self.translation_worker.progress_updated.connect(self.on_translation_progress)
         self.translation_worker.translation_complete.connect(self.on_translation_complete)
         self.translation_worker.error_occurred.connect(self.on_translation_error)
         
+        # Connect thread events
         self.translation_thread.started.connect(self.start_translation_task)
+        self.translation_thread.finished.connect(self.translation_thread.deleteLater)
+        
+        # Set up cancellation
+        self.cancel_requested = False
+        self.translate_btn.setText("Cancel")
+        self.translate_btn.clicked.disconnect()
+        self.translate_btn.clicked.connect(self.cancel_translation)
+        
+        # Show busy state
+        self.set_busy(True, "Starting translation...")
+        
+        # Start the thread
         self.translation_thread.start()
     
     def start_translation_task(self):
@@ -583,21 +671,80 @@ class MainWindow(QMainWindow):
 
     def on_translation_progress(self, current: int, total: int, status: str):
         """Handle translation progress."""
-        self.progress_bar.setMaximum(total)
-        self.progress_bar.setValue(current)
-        self.status_label.setText(status)
+        try:
+            self.progress_bar.setMaximum(total)
+            self.progress_bar.setValue(current)
+            
+            # Update status with progress percentage
+            if total > 0:
+                percent = int((current / total) * 100)
+                status = f"{status} ({percent}%)"
+            
+            self.status_label.setText(status)
+            
+            # Process events to keep UI responsive
+            QApplication.processEvents()
+            
+        except Exception as e:
+            self.log(f"Error updating progress: {e}", 'error')
+    
+    def cancel_translation(self):
+        """Cancel the current translation process."""
+        if not self._is_busy:
+            return
+            
+        if QMessageBox.question(
+            self, 
+            "Cancel Translation", 
+            "Are you sure you want to cancel the current translation?"
+        ) == QMessageBox.StandardButton.Yes:
+            self.cancel_requested = True
+            if self.translation_worker:
+                self.translation_worker.stop()
+            self.cleanup_translation()
+            self.log("Translation cancelled by user.", 'warning')
+            self.status_label.setText("Translation cancelled")
+    
+    def cleanup_translation(self):
+        """Clean up after translation is complete or cancelled."""
+        # Reset UI
+        self.translate_btn.setText("Translate")
+        self.translate_btn.clicked.disconnect()
+        self.translate_btn.clicked.connect(self.start_translation)
+        
+        # Clean up thread and worker
+        if self.translation_thread:
+            if self.translation_thread.isRunning():
+                self.translation_thread.quit()
+                self.translation_thread.wait(2000)  # Wait up to 2 seconds
+            self.translation_thread = None
+        
+        self.translation_worker = None
+        self.set_busy(False)
     
     def on_translation_complete(self, success: bool, message: str):
         """Handle translation completion."""
-        self.translate_btn.setEnabled(True)
-        self.status_label.setText("Ready")
-        self.progress_bar.setValue(0)
-        
-        if self.translation_thread:
-            self.translation_thread.quit()
-            self.translation_thread.wait()
-        
-        QMessageBox.information(self, "Translation Complete", message)
+        try:
+            self.status_label.setText("Ready" if success else "Translation completed with errors")
+            
+            if success:
+                self.progress_bar.setValue(self.progress_bar.maximum())
+                self.log("Translation completed successfully!", 'success')
+            else:
+                self.log(f"Translation completed with errors: {message}", 'error')
+            
+            if not self.cancel_requested:
+                QMessageBox.information(
+                    self, 
+                    "Translation Complete", 
+                    message,
+                    QMessageBox.StandardButton.Ok,
+                    QMessageBox.StandardButton.Ok
+                )
+        except Exception as e:
+            self.log(f"Error in completion handler: {e}", 'error')
+        finally:
+            self.cleanup_translation()
     
     @pyqtSlot(str)
     def on_translation_error(self, error: str):
@@ -650,24 +797,46 @@ class MainWindow(QMainWindow):
         """Handle drop event."""
         files = [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile()]
         self.add_file_paths(files)
+        
+    def resizeEvent(self, event):
+        """Handle window resize event."""
+        super().resizeEvent(event)
+        # Update overlay and spinner positions when window is resized
+        if hasattr(self, 'overlay') and hasattr(self, 'spinner'):
+            self.overlay.setGeometry(0, 0, self.width(), self.height())
+            self.spinner.move(
+                (self.width() - self.spinner.width()) // 2,
+                (self.height() - self.spinner.height()) // 2
+            )
 
 
 def main():
     """Main entry point for the GUI application."""
-    if hasattr(Qt, 'AA_EnableHighDpiScaling'):
-        QApplication.setAttribute(Qt.ApplicationAttribute.AA_EnableHighDpiScaling, True)
-    if hasattr(Qt, 'AA_UseHighDpiPixmaps'):
-        QApplication.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps, True)
+    # Set high DPI settings before creating the application
+    QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
+        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+    )
     
-    if hasattr(Qt, 'HighDpiScaleFactorRoundingPolicy'):
-        QGuiApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+    # Enable high DPI scaling
+    QGuiApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+    QGuiApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
     
+    # Set up logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler('subtitle_translator.log')
+        ]
+    )
+    
+    # Create application
     app = QApplication(sys.argv)
+    
     app.setApplicationName("Subtitle Translator")
     app.setApplicationVersion(__version__)
     app.setOrganizationName("YourOrg")
-    
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     
     set_application_style(app)
     

@@ -684,7 +684,7 @@ class MainWindow(QMainWindow):
         self.translate_btn.clicked.connect(self.cancel_translation)
         
         # Show busy state
-        self.set_busy(True, "Starting translation...")
+        self.set_busy(True, "Working on translation...")
         
         # Start the thread
         self.translation_thread.start()

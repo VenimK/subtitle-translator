@@ -813,13 +813,16 @@ class MainWindow(QMainWindow):
 def main():
     """Main entry point for the GUI application."""
     # Set high DPI settings before creating the application
-    QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
-        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
-    )
+    if hasattr(Qt, 'HighDpiScaleFactorRoundingPolicy'):
+        QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
+            Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+        )
     
     # Enable high DPI scaling
-    QGuiApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
-    QGuiApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+    if hasattr(Qt.ApplicationAttribute, 'AA_EnableHighDpiScaling'):
+        QGuiApplication.setAttribute(Qt.ApplicationAttribute.AA_EnableHighDpiScaling, True)
+    if hasattr(Qt.ApplicationAttribute, 'AA_UseHighDpiPixmaps'):
+        QGuiApplication.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps, True)
     
     # Set up logging
     logging.basicConfig(

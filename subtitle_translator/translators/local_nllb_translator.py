@@ -104,7 +104,7 @@ class LocalNLLBTranslator(BaseTranslator):
         block_indices = []
         
         for i, block in enumerate(blocks):
-            if block['type'] == 'text':
+            if block['type'] == 'subtitle':
                 text_blocks.append(block['content'])
                 block_indices.append(i)
         
@@ -217,83 +217,63 @@ class LocalNLLBTranslator(BaseTranslator):
     
     def _parse_subtitle_blocks(self, lines: List[str]) -> List[Dict[str, Any]]:
         """Parse subtitle file into blocks of text and metadata.
-        
+
         Args:
             lines: List of lines from the subtitle file
-            
+
         Returns:
-            List of blocks with type and content
+            List of blocks, where each block represents a complete subtitle entry.
         """
         blocks = []
-        current_block = []
-        current_index = None
-        
-        for line in lines:
-            line = line.strip()
-            
-            # Empty line indicates end of a text block
-            if not line:
-                if current_block:
+        i = 0
+        while i < len(lines):
+            line = lines[i].strip()
+            if line.isdigit():
+                index = line
+                i += 1
+                if i < len(lines) and '-->' in lines[i]:
+                    timestamp = lines[i].strip()
+                    i += 1
+                    text_lines = []
+                    while i < len(lines) and lines[i].strip() != '':
+                        text_lines.append(lines[i].strip())
+                        i += 1
+                    
                     blocks.append({
-                        'type': 'text',
-                        'index': current_index,
-                        'content': '\n'.join(current_block)
+                        'type': 'subtitle',
+                        'index': index,
+                        'timestamp': timestamp,
+                        'content': '\n'.join(text_lines)
                     })
-                    current_block = []
-                    current_index = None
-                continue
-                
-            # Check if line is a block index
-            if not current_block and line.isdigit():
-                current_index = int(line)
-                continue
-                
-            # Check if line is a timestamp (format: 00:00:00,000 --> 00:00:00,000)
-            if '-->' in line and not current_block:
-                blocks.append({
-                    'type': 'timestamp',
-                    'content': line
-                })
-                continue
-                
-            # Otherwise, it's part of the text block
-            current_block.append(line)
-        
-        # Add the last block if any
-        if current_block:
-            blocks.append({
-                'type': 'text',
-                'index': current_index,
-                'content': '\n'.join(current_block)
-            })
-        
+                else: # It's just a number in the text
+                    blocks.append({'type': 'other', 'content': line})
+            elif line:
+                blocks.append({'type': 'other', 'content': line})
+            
+            i += 1 # Move to the next line
+
         return blocks
     
     def _format_subtitle_blocks(self, blocks: List[Dict[str, Any]]) -> str:
         """Format blocks back into subtitle file content.
-        
+
         Args:
             blocks: List of blocks with type and content
-            
+
         Returns:
             Formatted subtitle text
         """
-        lines = []
-        
+        output_lines = []
         for block in blocks:
-            if block['type'] == 'text':
-                if 'index' in block and block['index'] is not None:
-                    lines.append(str(block['index']))
-                lines.append(block['content'])
-                lines.append('')  # Empty line after text block
-            else:  # timestamp or other metadata
-                lines.append(block['content'])
+            if block['type'] == 'subtitle':
+                output_lines.append(block['index'])
+                output_lines.append(block['timestamp'])
+                output_lines.append(block['content'])
+                output_lines.append('')  # Separator
+            else:
+                output_lines.append(block['content'])
         
-        # Remove trailing empty lines
-        while lines and not lines[-1].strip():
-            lines.pop()
-            
-        return '\n'.join(lines)
+        return '\n'.join(output_lines)
     
     async def close(self):
         """Close the HTTP session."""

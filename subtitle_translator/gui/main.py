@@ -94,6 +94,25 @@ def set_application_style(app):
         app.setPalette(light_palette)
 
 
+class AsyncRunner(QObject):
+    """Runs an async function in a separate thread's event loop."""
+    started = pyqtSignal()
+    finished = pyqtSignal()
+
+    def __init__(self, coro, *args, **kwargs):
+        super().__init__()
+        self._coro = coro
+        self._args = args
+        self._kwargs = kwargs
+
+    def run(self):
+        """Run the coroutine."""
+        self.started.emit()
+        try:
+            asyncio.run(self._coro(*self._args, **self._kwargs))
+        finally:
+            self.finished.emit()
+
 class TranslationWorker(QObject):
     """Worker for handling translation in a separate thread."""
     
@@ -124,7 +143,7 @@ class TranslationWorker(QObject):
         """Emit a log message."""
         self.log_message.emit(message, level)
 
-    async def run(self):
+    async def run_translation(self):
         """Run the translation process."""
         total = len(self.files)
         success_count = 0
@@ -649,8 +668,13 @@ class MainWindow(QMainWindow):
         self.translation_worker.translation_complete.connect(self.on_translation_complete)
         self.translation_worker.error_occurred.connect(self.on_translation_error)
         
+        # Create a runner for the async task
+        self.async_runner = AsyncRunner(self.translation_worker.run_translation)
+        self.async_runner.moveToThread(self.translation_thread)
+
         # Connect thread events
-        self.translation_thread.started.connect(self.start_translation_task)
+        self.translation_thread.started.connect(self.async_runner.run)
+        self.async_runner.finished.connect(self.cleanup_translation)
         self.translation_thread.finished.connect(self.translation_thread.deleteLater)
         
         # Set up cancellation
@@ -665,9 +689,6 @@ class MainWindow(QMainWindow):
         # Start the thread
         self.translation_thread.start()
     
-    def start_translation_task(self):
-        """Start the translation task in the asyncio event loop."""
-        QTimer.singleShot(0, lambda: asyncio.run(self.translation_worker.run()))
 
     def on_translation_progress(self, current: int, total: int, status: str):
         """Handle translation progress."""

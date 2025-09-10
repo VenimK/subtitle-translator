@@ -18,6 +18,7 @@ from PyQt6.QtGui import (
     QGuiApplication, QFontDatabase, QPainter
 )
 from PyQt6.QtWidgets import (
+    QTableView,
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QFileDialog, QComboBox, QSpinBox, QLineEdit, QTextEdit,
     QProgressBar, QStatusBar, QSplitter, QToolBar, QMenuBar, QMenu,
@@ -30,6 +31,18 @@ from PyQt6.QtWidgets import (
 from ..core import Translator, TranslationConfig, TranslationResult
 from ..utils.config import ConfigManager
 from .. import __version__
+
+class QtLogHandler(logging.Handler, QObject):
+    """A logging handler that emits a Qt signal."""
+    log_updated = pyqtSignal(str, str)
+
+    def __init__(self, parent=None):
+        super().__init__()
+        QObject.__init__(self, parent)
+
+    def emit(self, record):
+        log_entry = self.format(record)
+        self.log_updated.emit(log_entry, record.levelname.lower())
 
 logger = logging.getLogger(__name__)
 
@@ -119,8 +132,8 @@ class TranslationWorker(QObject):
     # Signals
     progress_updated = pyqtSignal(int, int, str)  # current, total, status
     translation_complete = pyqtSignal(bool, str)   # success, message
+    review_ready = pyqtSignal(object, object, object) # original_subs, translated_subs, output_path
     error_occurred = pyqtSignal(str)               # error message
-    log_message = pyqtSignal(str, str)             # message, level
     
     def __init__(self, translator: Translator, files: List[Path], output_dir: Path):
         """Initialize the translation worker."""
@@ -139,22 +152,19 @@ class TranslationWorker(QObject):
             else:
                 self.translator.close()
 
-    def _log(self, message: str, level: str = 'info'):
-        """Emit a log message."""
-        self.log_message.emit(message, level)
 
     async def run_translation(self):
         """Run the translation process."""
         total = len(self.files)
         success_count = 0
         
-        self._log(f"Starting translation of {total} files...", 'info')
+        logger.info(f"Starting translation of {total} files...")
         start_time = time.time()
         
         try:
             for i, input_file in enumerate(self.files, 1):
                 if not self._is_running:
-                    self._log("Translation cancelled by user.", 'warning')
+                    logger.warning("Translation cancelled by user.")
                     break
                 
                 file_start_time = time.time()
@@ -171,40 +181,85 @@ class TranslationWorker(QObject):
                 output_file = self.output_dir / f"{stem}_{lang_code}{input_file.suffix}"
                 
                 try:
-                    result = await self.translator.translate_file(
+                    translation_result = await self.translator.translate_file(
                         input_file,
-                        output_file,
                         source_language=self.translator.config.source_language,
                         target_language=self.translator.config.target_language
                     )
-                    
-                    if result.success:
+
+                    if translation_result:
+                        original_subs, translated_subs = translation_result
+                        self.review_ready.emit(original_subs, translated_subs, output_file)
                         success_count += 1
                         file_time = time.time() - file_start_time
-                        self._log(f"Successfully translated {input_file.name} in {file_time:.2f}s", 'info')
+                        logger.info(f"Successfully translated {input_file.name} in {file_time:.2f}s. Ready for review.")
                     else:
-                        error_msg = f"Failed to translate {input_file.name}: {result.error}"
-                        self._log(error_msg, 'error')
+                        error_msg = f"Failed to translate {input_file.name}"
+                        logger.error(error_msg)
                         self.error_occurred.emit(error_msg)
                 
                 except Exception as e:
                     error_msg = f"Error translating {input_file.name}: {str(e)}"
-                    self._log(error_msg, 'error')
+                    logger.error(error_msg, exc_info=True)
                     self.error_occurred.emit(error_msg)
             
             total_time = time.time() - start_time
             if self._is_running:
                 msg = f"Translation complete. {success_count}/{total} files processed in {total_time:.2f}s."
-                self._log(msg, 'info' if success_count == total else 'warning')
+                if success_count == total:
+                    logger.info(msg)
+                else:
+                    logger.warning(msg)
                 self.translation_complete.emit(success_count > 0, msg)
             else:
                 self.translation_complete.emit(False, "Translation cancelled.")
                 
         except Exception as e:
-            self._log(f"An unexpected error occurred: {e}", 'error')
+            logger.error(f"An unexpected error occurred: {e}", exc_info=True)
             self.error_occurred.emit(f"Unexpected error: {str(e)}")
             self.translation_complete.emit(False, "Translation failed.")
 
+
+class ReviewWindow(QDialog):
+    """A dialog for reviewing and editing translations."""
+
+    def __init__(self, original_subs, translated_subs, parent=None):
+        super().__init__(parent)
+        self.original_subs = original_subs
+        self.translated_subs = translated_subs
+        self.init_ui()
+
+    def init_ui(self):
+        self.setWindowTitle("Review Translation")
+        self.setMinimumSize(1000, 600)
+        self.setLayout(QVBoxLayout())
+
+        # Table view for side-by-side comparison
+        self.table_view = QTableView()
+        self.model = QStandardItemModel()
+        self.model.setHorizontalHeaderLabels(["Original Text", "Translated Text"])
+        self.table_view.setModel(self.model)
+        self.table_view.horizontalHeader().setStretchLastSection(True)
+        self.layout().addWidget(self.table_view)
+
+        # Populate the model
+        for i in range(len(self.original_subs)):
+            original_item = QStandardItem(self.original_subs[i].text)
+            translated_item = QStandardItem(self.translated_subs[i].text)
+            original_item.setFlags(original_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.model.appendRow([original_item, translated_item])
+
+        # Buttons
+        button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        button_box.accepted.connect(self.accept)
+        button_box.rejected.connect(self.reject)
+        self.layout().addWidget(button_box)
+
+    def get_edited_subs(self):
+        """Return the subtitle object with edited text."""
+        for i in range(self.model.rowCount()):
+            self.translated_subs[i].text = self.model.item(i, 1).text()
+        return self.translated_subs
 
 class MainWindow(QMainWindow):
     """Main application window."""
@@ -214,7 +269,16 @@ class MainWindow(QMainWindow):
         super().__init__()
         
         self.config = config
+        self.settings = QSettings()
         self.translator = None
+
+        # Set up logging
+        self.log_handler = QtLogHandler()
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        self.log_handler.setFormatter(formatter)
+        self.log_handler.log_updated.connect(self.log)
+        logging.getLogger().addHandler(self.log_handler)
+        logging.getLogger().setLevel(logging.INFO)
         self.translation_worker = None
         self.translation_thread = None
         self.current_files = []
@@ -310,16 +374,47 @@ class MainWindow(QMainWindow):
         self.translator_combo = QComboBox()
         self.translator_combo.addItem("Local NLLB Server", "local_nllb")
         self.translator_combo.addItem("Hugging Face API", "huggingface")
+        self.translator_combo.addItem("Google Translate", "google")
+        self.translator_combo.addItem("DeepL", "deepl")
+        self.translator_combo.addItem("Gemini", "gemini")
         self.translator_combo.currentIndexChanged.connect(self.on_translator_changed)
         
         self.endpoint_edit = QLineEdit()
         self.endpoint_edit.setPlaceholderText("http://localhost:8080/translate")
         self.endpoint_edit.textChanged.connect(self.on_settings_changed)
+
+        # Hugging Face Settings
+        self.hf_settings = QWidget()
+        hf_layout = QFormLayout(self.hf_settings)
+        self.hf_api_key_edit = QLineEdit()
+        self.hf_api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.hf_api_key_edit.textChanged.connect(self.on_settings_changed)
+        hf_layout.addRow("API Key:", self.hf_api_key_edit)
+
+        # DeepL Settings
+        self.deepl_settings = QWidget()
+        deepl_layout = QFormLayout(self.deepl_settings)
+        self.deepl_api_key_edit = QLineEdit()
+        self.deepl_api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.deepl_api_key_edit.textChanged.connect(self.on_settings_changed)
+        deepl_layout.addRow("API Key:", self.deepl_api_key_edit)
         
-        self.api_key_edit = QLineEdit()
-        self.api_key_edit.setPlaceholderText("Enter your Hugging Face API key")
-        self.api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self.api_key_edit.textChanged.connect(self.on_settings_changed)
+        self.gemini_settings = QWidget()
+        gemini_layout = QFormLayout(self.gemini_settings)
+        self.gemini_api_key_edit = QLineEdit()
+        self.gemini_api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.gemini_api_key_edit.textChanged.connect(self.on_settings_changed)
+        gemini_layout.addRow("API Key:", self.gemini_api_key_edit)
+
+        self.gemini_prompt_edit = QTextEdit()
+        self.gemini_prompt_edit.setPlaceholderText("Enter your custom prompt template here.")
+        self.gemini_prompt_edit.textChanged.connect(self.on_settings_changed)
+        gemini_layout.addRow("Prompt Template:", self.gemini_prompt_edit)
+
+        self.gemini_tone_edit = QLineEdit()
+        self.gemini_tone_edit.setPlaceholderText("e.g., formal, informal, humorous")
+        gemini_layout.addRow("Tone:", self.gemini_tone_edit)
+        self.gemini_tone_edit.textChanged.connect(self.on_settings_changed)
         
         self.source_lang_combo = QComboBox()
         self.target_lang_combo = QComboBox()
@@ -338,7 +433,9 @@ class MainWindow(QMainWindow):
         
         settings_layout.addRow("Translator:", self.translator_combo)
         settings_layout.addRow("Endpoint:", self.endpoint_edit)
-        settings_layout.addRow("API Key:", self.api_key_edit)
+        settings_layout.addRow("Hugging Face Settings:", self.hf_settings)
+        settings_layout.addRow("DeepL Settings:", self.deepl_settings)
+        settings_layout.addRow("Gemini Settings:", self.gemini_settings)
         settings_layout.addRow("Source Language:", self.source_lang_combo)
         settings_layout.addRow("Target Language:", self.target_lang_combo)
         settings_layout.addRow("Batch Size:", self.batch_size_spin)
@@ -363,7 +460,9 @@ class MainWindow(QMainWindow):
         
         self.log_edit = QTextEdit()
         self.log_edit.setReadOnly(True)
-        self.log_edit.setFont(QFont("Monospace"))
+        monospace_font = QFont('Menlo' if sys.platform == 'darwin' else 'Courier New')
+        monospace_font.setStyleHint(QFont.StyleHint.Monospace)
+        self.log_edit.setFont(monospace_font)
         
         progress_layout.addWidget(self.status_label)
         progress_layout.addWidget(self.progress_bar)
@@ -405,6 +504,20 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Ready")
         self.setAcceptDrops(True)
         self.on_translator_changed()
+
+    @pyqtSlot(str, str)
+    def log(self, message: str, level: str = 'info'):
+        """Log a message to the log widget."""
+        color_map = {
+            'debug': 'gray',
+            'info': 'white',
+            'warning': 'orange',
+            'error': 'red',
+            'critical': 'red',
+        }
+        color = color_map.get(level, 'white')
+        log_entry = f'<font color="{color}">{message}</font>'
+        self.log_edit.append(log_entry)
     
     def create_toolbar(self):
         """Create the application toolbar."""
@@ -491,7 +604,11 @@ class MainWindow(QMainWindow):
             self.translator_combo.setCurrentIndex(index)
         
         self.endpoint_edit.setText(self.config.get('translator.endpoint', 'http://localhost:8080/translate'))
-        self.api_key_edit.setText(self.config.get('translator.api_key', ''))
+        self.hf_api_key_edit.setText(self.settings.value("huggingface/api_key", ""))
+        self.deepl_api_key_edit.setText(self.settings.value("deepl/api_key", ""))
+        self.gemini_api_key_edit.setText(self.settings.value("gemini/api_key", ""))
+        self.gemini_prompt_edit.setText(self.settings.value("gemini/prompt_template", ""))
+        self.gemini_tone_edit.setText(self.settings.value("gemini/tone", ""))
         self.batch_size_spin.setValue(self.config.get('translator.batch_size', 5))
         self.timeout_spin.setValue(self.config.get('translator.timeout', 300))
         
@@ -511,7 +628,11 @@ class MainWindow(QMainWindow):
         """Save settings to config."""
         self.config.set('translator.type', self.translator_combo.currentData())
         self.config.set('translator.endpoint', self.endpoint_edit.text())
-        self.config.set('translator.api_key', self.api_key_edit.text())
+        self.settings.setValue("huggingface/api_key", self.hf_api_key_edit.text())
+        self.settings.setValue("deepl/api_key", self.deepl_api_key_edit.text())
+        self.settings.setValue("gemini/api_key", self.gemini_api_key_edit.text())
+        self.settings.setValue("gemini/prompt_template", self.gemini_prompt_edit.toPlainText())
+        self.settings.setValue("gemini/tone", self.gemini_tone_edit.text())
         self.config.set('translator.batch_size', self.batch_size_spin.value())
         self.config.set('translator.timeout', self.timeout_spin.value())
         self.config.set('languages.source', self.source_lang_combo.currentData())
@@ -563,10 +684,21 @@ class MainWindow(QMainWindow):
     def init_translator(self):
         """Initialize the translator with current settings."""
         try:
+            translator_type = self.translator_combo.currentData()
+            api_key = ""
+            if translator_type == 'huggingface':
+                api_key = self.hf_api_key_edit.text()
+            elif translator_type == 'deepl':
+                api_key = self.deepl_api_key_edit.text()
+            elif translator_type == 'gemini':
+                api_key = self.gemini_api_key_edit.text()
+
             config = TranslationConfig(
-                translator_type=self.translator_combo.currentData(),
+                translator_type=translator_type,
                 endpoint=self.endpoint_edit.text(),
-                api_key=self.api_key_edit.text(),
+                api_key=api_key,
+                gemini_prompt_template=self.gemini_prompt_edit.toPlainText(),
+                gemini_tone=self.gemini_tone_edit.text(),
                 batch_size=self.batch_size_spin.value(),
                 source_language=self.source_lang_combo.currentData(),
                 target_language=self.target_lang_combo.currentData(),
@@ -579,9 +711,16 @@ class MainWindow(QMainWindow):
     
     def on_translator_changed(self):
         """Handle translator type change."""
-        is_local = (self.translator_combo.currentData() == 'local_nllb')
+        translator_type = self.translator_combo.currentData()
+        is_local = (translator_type == 'local_nllb')
+        is_hf = (translator_type == 'huggingface')
+        is_deepl = (translator_type == 'deepl')
+        is_gemini = (translator_type == 'gemini')
+
         self.endpoint_edit.setVisible(is_local)
-        self.api_key_edit.setVisible(not is_local)
+        self.hf_settings.setVisible(is_hf)
+        self.deepl_settings.setVisible(is_deepl)
+        self.gemini_settings.setVisible(is_gemini)
         self.init_translator()
     
     def on_settings_changed(self):
@@ -663,9 +802,9 @@ class MainWindow(QMainWindow):
         self.translation_worker.moveToThread(self.translation_thread)
         
         # Connect signals
-        self.translation_worker.log_message.connect(self.log)
         self.translation_worker.progress_updated.connect(self.on_translation_progress)
         self.translation_worker.translation_complete.connect(self.on_translation_complete)
+        self.translation_worker.review_ready.connect(self.show_review_window)
         self.translation_worker.error_occurred.connect(self.on_translation_error)
         
         # Create a runner for the async task
@@ -771,6 +910,18 @@ class MainWindow(QMainWindow):
     def on_translation_error(self, error: str):
         """Handle translation errors."""
         self.log(error, 'error')
+
+    def show_review_window(self, original_subs, translated_subs, output_path):
+        """Show the review window for a translated file."""
+        review_window = ReviewWindow(original_subs, translated_subs, self)
+        if review_window.exec():
+            edited_subs = review_window.get_edited_subs()
+            try:
+                edited_subs.save(str(output_path))
+                self.log(f"Saved reviewed translation to {output_path.name}", 'success')
+            except Exception as e:
+                self.log(f"Failed to save reviewed translation: {e}", 'error')
+                QMessageBox.critical(self, "Save Error", f"Failed to save file: {e}")
 
     @pyqtSlot(str, str)
     def log(self, message: str, level: str = 'info'):

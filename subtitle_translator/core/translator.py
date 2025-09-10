@@ -27,6 +27,8 @@ class TranslationConfig:
     timeout: int = 300
     max_retries: int = 3
     retry_delay: int = 5
+    gemini_prompt_template: str = "Translate the following text from {source_language} to {target_language}. Please provide only the translated text, without any additional explanations or context. Maintain the original meaning and tone as much as possible."
+    gemini_tone: str = ""
 
 @dataclass
 class TranslationResult:
@@ -57,7 +59,9 @@ class Translator:
                 'batch_size': self.config.batch_size,
                 'timeout': self.config.timeout,
                 'source_language': self.config.source_language,
-                'target_language': self.config.target_language
+                'target_language': self.config.target_language,
+                'prompt_template': self.config.gemini_prompt_template,
+                'tone': self.config.gemini_tone
             }
             self.translator = TranslatorFactory.create_translator(
                 self.config.translator_type,
@@ -179,68 +183,34 @@ class Translator:
     async def translate_file(
         self,
         input_file: Union[str, Path],
-        output_file: Optional[Union[str, Path]] = None,
         source_language: Optional[str] = None,
         target_language: Optional[str] = None,
         **kwargs
-    ) -> TranslationResult:
+    ):
         """
         Translate a subtitle file.
         """
         input_path = Path(input_file)
         if not input_path.exists():
             raise FileNotFoundError(f"Input file not found: {input_path}")
-        
+
         src_lang = source_language or self.config.source_language
         if src_lang == 'auto':
             src_lang = self._detect_language(input_path)
             logger.info(f"Detected source language for {input_path.name}: {src_lang}")
 
         tgt_lang = target_language or self.config.target_language
-        
-        if output_file is None:
-            # Remove any existing language code from the filename
-            stem = input_path.stem
-            # Pattern to match language codes like .eng, _eng, .spa, _spa, etc.
-            import re
-            # First try to match common patterns with dots or underscores
-            stem = re.sub(r'[._](eng|spa|nld|deu|fra|ita|por|rus|jpn|kor|zho|ara|tur|pol|ukr|swe|dan|nor|fin|hun|ces|ron|ell|bul|srp|hrv|slv|mkd|bos)(?:_[A-Za-z]{4,5})?$', '', stem)
-            # Also handle cases where the code might be at the end after a track number
-            stem = re.sub(r'[._]track\d+[._](eng|spa|nld|deu|fra|ita|por|rus|jpn|kor|zho|ara|tur|pol|ukr|swe|dan|nor|fin|hun|ces|ron|ell|bul|srp|hrv|slv|mkd|bos)(?:_[A-Za-z]{4,5})?$', '', stem)
-            # Add the new target language code with an underscore
-            output_path = input_path.with_name(f"{stem}_{tgt_lang}{input_path.suffix}")
-        else:
-            output_path = Path(output_file)
-        
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        result = TranslationResult(
-            success=False,
-            input_file=input_path,
-            output_file=output_path,
-            source_language=src_lang,
-            target_language=tgt_lang
-        )
-        
+
         try:
-            success = await self.translator.translate_file(
+            return await self.translator.translate_file(
                 input_path,
-                output_path,
                 source_language=src_lang,
                 target_language=tgt_lang,
                 **kwargs
             )
-            
-            result.success = bool(success)
-            if not success:
-                result.error = "Translation failed with no error message"
-            
-            return result
-            
         except Exception as e:
-            result.error = str(e)
             logger.error(f"Translation failed: {e}", exc_info=True)
-            return result
+            return None
     
     def update_config(self, **kwargs):
         """Update the translator configuration."""

@@ -20,6 +20,10 @@ requires-python = ">=3.8"
 dependencies = [
     "aiohttp>=3.8.0",
     "langdetect>=1.0.9",
+    "pysubs2>=1.6.0",
+    "google-cloud-translate>=3.8.0",
+    "deepl>=1.15.0",
+    "google-generativeai>=0.3.0",
 ]
 
 [project.optional-dependencies]

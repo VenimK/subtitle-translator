@@ -58,6 +58,7 @@ jobs:
       run: |
         echo "Creating PyInstaller spec file"
         python -c "
+        import sys
         content = '''
         # -*- mode: python ; coding: utf-8 -*-
 
@@ -80,27 +81,60 @@ jobs:
         )
         pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-        exe = EXE(
-            pyz,
-            a.scripts,
-            a.binaries,
-            a.zipfiles,
-            a.datas,
-            [],
-            name='${{ matrix.output_name }}',
-            debug=False,
-            bootloader_ignore_signals=False,
-            strip=False,
-            upx=True,
-            upx_exclude=[],
-            runtime_tmpdir=None,
-            console=False,
-            disable_windowed_traceback=False,
-            argv_emulation=False,
-            target_arch=None,
-            codesign_identity=None,
-            entitlements_file=None,
-        )
+        if sys.platform == 'darwin':
+            exe = EXE(
+                pyz,
+                a.scripts,
+                [],
+                exclude_binaries=True,
+                name='${{ matrix.output_name }}',
+                debug=False,
+                bootloader_ignore_signals=False,
+                strip=False,
+                upx=True,
+                console=False,
+            )
+            coll = COLLECT(
+                exe,
+                a.binaries,
+                a.zipfiles,
+                a.datas,
+                strip=False,
+                upx=True,
+                upx_exclude=[],
+                name='${{ matrix.output_name }}',
+            )
+            app = APP(
+                a.scripts,
+                pyz,
+                exe,
+                coll,
+                name='${{ matrix.output_name }}',
+                icon=None,
+                bundle_identifier=None,
+            )
+        else:
+            exe = EXE(
+                pyz,
+                a.scripts,
+                a.binaries,
+                a.zipfiles,
+                a.datas,
+                [],
+                name='${{ matrix.output_name }}',
+                debug=False,
+                bootloader_ignore_signals=False,
+                strip=False,
+                upx=True,
+                upx_exclude=[],
+                runtime_tmpdir=None,
+                console=False,
+                disable_windowed_traceback=False,
+                argv_emulation=False,
+                target_arch=None,
+                codesign_identity=None,
+                entitlements_file=None,
+            )
         '''
         with open('subtitle_translator.spec', 'w') as f:
             f.write(content)
@@ -109,6 +143,9 @@ jobs:
     - name: Build with PyInstaller
       run: |
         pyinstaller subtitle_translator.spec
+
+    - name: List build artifacts
+      run: ls -R dist
 
     - name: Package Windows
       if: matrix.os == 'windows-latest'

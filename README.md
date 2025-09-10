@@ -7,8 +7,11 @@ A powerful and flexible subtitle translation tool that supports multiple transla
 - Translate subtitle files between multiple languages
 - Support for SRT format
 - Multiple translation backends:
-  - Local NLLB server
+  - DeepL
+  - Google Gemini
+  - Google Cloud Translate
   - Hugging Face Inference API
+  - Local NLLB Server
 - Command-line interface (CLI)
 - Graphical User Interface (GUI)
 - Batch processing of multiple files
@@ -18,7 +21,7 @@ A powerful and flexible subtitle translation tool that supports multiple transla
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/subtitle-translator.git
+   git clone https://github.com/VenimK/subtitle-translator.git
    cd subtitle-translator
    ```
 

@@ -56,7 +56,7 @@ jobs:
 
     - name: Clear PyInstaller cache
       run: |
-        pyinstaller-clear-cache
+        python -m PyInstaller.utils.cli clear-cache
 
     - name: Create PyInstaller spec file for macOS
       if: matrix.os == 'macos-latest'

@@ -372,9 +372,10 @@ class MainWindow(QMainWindow):
         settings_layout = QFormLayout(settings_group)
         
         self.translator_combo = QComboBox()
+        # Add Local NLLB first as it's the default
         self.translator_combo.addItem("Local NLLB Server", "local_nllb")
+        # Other translators
         self.translator_combo.addItem("Hugging Face API", "huggingface")
-        self.translator_combo.addItem("Google Translate", "google")
         self.translator_combo.addItem("DeepL", "deepl")
         self.translator_combo.addItem("Gemini", "gemini")
         self.translator_combo.currentIndexChanged.connect(self.on_translator_changed)
@@ -598,7 +599,8 @@ class MainWindow(QMainWindow):
     
     def load_settings(self):
         """Load settings from config."""
-        translator_type = self.config.get('translator.type', 'local_nllb')
+        # Always start with Local NLLB translator
+        translator_type = 'local_nllb'
         index = self.translator_combo.findData(translator_type)
         if index >= 0:
             self.translator_combo.setCurrentIndex(index)
@@ -684,7 +686,9 @@ class MainWindow(QMainWindow):
     def init_translator(self):
         """Initialize the translator with current settings."""
         try:
-            translator_type = self.translator_combo.currentData()
+            # Force Local NLLB as the default translator
+            translator_type = 'local_nllb'
+            self.translator_combo.setCurrentText("Local NLLB Server")
             api_key = ""
             if translator_type == 'huggingface':
                 api_key = self.hf_api_key_edit.text()

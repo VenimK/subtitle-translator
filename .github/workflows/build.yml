@@ -54,95 +54,16 @@ jobs:
       run: |
         pytest tests/ -v || echo "No tests found or tests failed"
 
-    - name: Create PyInstaller spec file
+    - name: Create PyInstaller spec file for macOS
+      if: matrix.os == 'macos-latest'
       run: |
-        echo "Creating PyInstaller spec file"
-        python -c "
-        import sys
-        content = '''
-        # -*- mode: python ; coding: utf-8 -*-
+        pyinstaller --windowed --name "${{ matrix.output_name }}" subtitle_translator/gui/main.py
 
-        block_cipher = None
-
-        a = Analysis(
-            ['subtitle_translator/gui/main.py'],
-            pathex=[],
-            binaries=[],
-            datas=[],
-            hiddenimports=[],
-            hookspath=[],
-            hooksconfig={},
-            runtime_hooks=[],
-            excludes=[],
-            win_no_prefer_redirects=False,
-            win_private_assemblies=False,
-            cipher=block_cipher,
-            noarchive=False,
-        )
-        pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
-
-        if sys.platform == 'darwin':
-            exe = EXE(
-                pyz,
-                a.scripts,
-                [],
-                exclude_binaries=True,
-                name='${{ matrix.output_name }}',
-                debug=False,
-                bootloader_ignore_signals=False,
-                strip=False,
-                upx=True,
-                console=False,
-            )
-            coll = COLLECT(
-                exe,
-                a.binaries,
-                a.zipfiles,
-                a.datas,
-                strip=False,
-                upx=True,
-                upx_exclude=[],
-                name='${{ matrix.output_name }}',
-            )
-            app = APP(
-                a.scripts,
-                pyz,
-                exe,
-                coll,
-                name='${{ matrix.output_name }}',
-                icon=None,
-                bundle_identifier=None,
-            )
-        else:
-            exe = EXE(
-                pyz,
-                a.scripts,
-                a.binaries,
-                a.zipfiles,
-                a.datas,
-                [],
-                name='${{ matrix.output_name }}',
-                debug=False,
-                bootloader_ignore_signals=False,
-                strip=False,
-                upx=True,
-                upx_exclude=[],
-                runtime_tmpdir=None,
-                console=False,
-                disable_windowed_traceback=False,
-                argv_emulation=False,
-                target_arch=None,
-                codesign_identity=None,
-                entitlements_file=None,
-            )
-        '''
-        with open('subtitle_translator.spec', 'w') as f:
-            f.write(content)
-        "
-
-    - name: Build with PyInstaller
+    - name: Create PyInstaller spec file for other OS
+      if: matrix.os != 'macos-latest'
       run: |
-        pyinstaller subtitle_translator.spec
+        pyinstaller --onefile --windowed --name "${{ matrix.output_name }}" subtitle_translator/gui/main.py
+
 
     - name: List build artifacts
       run: ls -R dist

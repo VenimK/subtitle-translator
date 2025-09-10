@@ -32,9 +32,21 @@ jobs:
 
     - name: Build macOS app
       run: |
+        QT_PATH=$(${{ steps.setup-python.outputs.python-path }} -c 'import PyQt6; print(PyQt6.__path__[0])')
         ${{ steps.setup-python.outputs.python-path }} -m PyInstaller \
           --windowed \
           --name "${{ env.APP_NAME }}" \
+          --add-data "${QT_PATH}:PyQt6" \
+          --add-data "${QT_PATH}/Qt6/plugins/platforms:PyQt6/Qt6/plugins/platforms" \
+          --add-data "${QT_PATH}/Qt6/plugins/styles:PyQt6/Qt6/plugins/styles" \
+          --runtime-hook hook-qt.py \
+          --runtime-hook rthook.py \
+          --hidden-import PyQt6.QtCore \
+          --hidden-import PyQt6.QtGui \
+          --hidden-import PyQt6.QtWidgets \
+          --hidden-import PyQt6.sip \
+          --hidden-import PyQt6.QtDBus \
+          --collect-all PyQt6 \
           subtitle_translator/gui/main.py
 
     - name: Package app

@@ -81,9 +81,9 @@ class GeminiTranslator(BaseTranslator):
                     input_cost = (prompt_tokens / 1000) * pricing['input']
                     output_cost = (candidates_tokens / 1000) * pricing['output']
                     total_cost = input_cost + output_cost
-                    cost_info = f" | Cost: ${total_cost:.6f}"
+                    cost_info = f" | Cost: <font color=\"lightgreen\">${total_cost:.6f}</font>"
                 
-                logger.info(f"Gemini token usage: {prompt_tokens} (prompt) + {candidates_tokens} (candidates) = {total_tokens} total tokens.{cost_info}")
+                logger.info(f"Gemini token usage: <font color=\"cyan\">{prompt_tokens}</font> (prompt) + <font color=\"magenta\">{candidates_tokens}</font> (candidates) = <font color=\"yellow\">{total_tokens}</font> total tokens.{cost_info}")
             return response.text
         except Exception as e:
             logger.error(f"Gemini translation failed: {e}", exc_info=True)
@@ -133,7 +133,7 @@ class GeminiTranslator(BaseTranslator):
         translated_texts = await asyncio.gather(*tasks)
         
         total_tokens = total_prompt_tokens + total_candidates_tokens
-        cost_info = f" | Total Cost: ${total_cost:.6f}" if total_cost > 0 else ""
-        logger.info(f"Gemini batch translation completed. Total tokens: {total_prompt_tokens} (prompt) + {total_candidates_tokens} (candidates) = {total_tokens}.{cost_info}")
+        cost_info = f" | Total Cost: <font color=\"lightgreen\">${total_cost:.6f}</font>" if total_cost > 0 else ""
+        logger.info(f"Gemini batch translation completed. Total tokens: <font color=\"cyan\">{total_prompt_tokens}</font> (prompt) + <font color=\"magenta\">{total_candidates_tokens}</font> (candidates) = <font color=\"yellow\">{total_tokens}</font>.{cost_info}")
         
         return translated_texts

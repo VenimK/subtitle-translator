@@ -34,18 +34,14 @@ jobs:
         python -m pip install --upgrade pip
         pip install -e ".[gui]"
 
-    - name: Install testing and build dependencies
+    - name: Install build dependencies and clear cache
       run: |
         pip install pyinstaller pytest
-
+        python -m PyInstaller.utils.cli clear-cache
 
     - name: Run tests
       run: |
         pytest tests/ -v || echo "No tests found or tests failed"
-
-    - name: Clear PyInstaller cache
-      run: |
-        python -m PyInstaller.utils.cli clear-cache
 
     - name: Create PyInstaller spec file for macOS
       if: matrix.os == 'macos-latest'

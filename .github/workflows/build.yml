@@ -1,23 +1,17 @@
-name: Build Application
+name: Build macOS App
 
 on:
   push:
     tags:
       - 'v*'  # Trigger on version tags
-  # Enable manual triggering for testing
-  workflow_dispatch:
+  workflow_dispatch:  # Enable manual triggering for testing
 
 jobs:
   build:
-    name: Build ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [macos-latest]
-        include:
-          - os: macos-latest
-            output_name: subtitle_translator_macos
-            asset_name: subtitle-translator-macos.zip
+    name: Build macOS App
+    runs-on: macos-latest
+    env:
+      APP_NAME: subtitle_translator_macos
 
     steps:
     - name: Checkout code
@@ -34,52 +28,30 @@ jobs:
       run: |
         ${{ steps.setup-python.outputs.python-path }} -m pip install --upgrade pip
         ${{ steps.setup-python.outputs.python-path }} -m pip install -e ".[gui]"
+        ${{ steps.setup-python.outputs.python-path }} -m pip install pyinstaller
 
-    - name: Install build dependencies and clear cache
+    - name: Build macOS app
       run: |
-        ${{ steps.setup-python.outputs.python-path }} -m pip install pyinstaller pytest
-        ${{ steps.setup-python.outputs.python-path }} -m PyInstaller.utils.cli clear-cache
+        ${{ steps.setup-python.outputs.python-path }} -m PyInstaller \
+          --windowed \
+          --name "${{ env.APP_NAME }}" \
+          subtitle_translator/gui/main.py
 
-    - name: Run tests
-      run: |
-        ${{ steps.setup-python.outputs.python-path }} -m pytest tests/ -v || echo "No tests found or tests failed"
-
-    - name: Create PyInstaller spec file for macOS
-      if: matrix.os == 'macos-latest'
-      run: |
-        ${{ steps.setup-python.outputs.python-path }} -m PyInstaller --windowed --name "${{ matrix.output_name }}" subtitle_translator/gui/main.py
-
-
-
-    - name: List build artifacts
-      run: ls -R dist
-
-    - name: Package macOS
-      if: matrix.os == 'macos-latest'
+    - name: Package app
       run: |
         cd dist
-        zip -r ../${{ matrix.asset_name }} ${{ matrix.output_name }}.app
+        zip -r ../subtitle-translator-macos.zip ${{ env.APP_NAME }}.app
         cd ..
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ matrix.os }}-build
-        path: ${{ matrix.asset_name }}
+        name: macos-build
+        path: subtitle-translator-macos.zip
 
-    - name: Clean up build files
-      run: rm -rf build dist
-
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          files: macos-latest-build/subtitle-translator-macos.zip
-          generate_release_notes: true
+    - name: Create Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: subtitle-translator-macos.zip
+        generate_release_notes: true

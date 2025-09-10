@@ -9,6 +9,7 @@ from typing import Dict, Any, List, Optional, Union
 import aiohttp
 
 from .base import BaseTranslator
+from ..utils.subtitle_parser import parse_srt_blocks, format_srt_blocks
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +98,7 @@ class LocalNLLBTranslator(BaseTranslator):
             return False
         
         # Parse the subtitle file
-        blocks = self._parse_subtitle_blocks(lines)
+        blocks = parse_srt_blocks(lines)
         
         # Extract text blocks for translation
         text_blocks = []
@@ -128,7 +129,7 @@ class LocalNLLBTranslator(BaseTranslator):
                 blocks[idx]['content'] = translated
             
             # Write the translated subtitle file
-            output_text = self._format_subtitle_blocks(blocks)
+            output_text = format_srt_blocks(blocks)
             output_path.write_text(output_text, encoding='utf-8')
             logger.info(f"Successfully translated {input_path} to {output_path}")
             return True
@@ -215,65 +216,6 @@ class LocalNLLBTranslator(BaseTranslator):
         
         return translated_texts
     
-    def _parse_subtitle_blocks(self, lines: List[str]) -> List[Dict[str, Any]]:
-        """Parse subtitle file into blocks of text and metadata.
-
-        Args:
-            lines: List of lines from the subtitle file
-
-        Returns:
-            List of blocks, where each block represents a complete subtitle entry.
-        """
-        blocks = []
-        i = 0
-        while i < len(lines):
-            line = lines[i].strip()
-            if line.isdigit():
-                index = line
-                i += 1
-                if i < len(lines) and '-->' in lines[i]:
-                    timestamp = lines[i].strip()
-                    i += 1
-                    text_lines = []
-                    while i < len(lines) and lines[i].strip() != '':
-                        text_lines.append(lines[i].strip())
-                        i += 1
-                    
-                    blocks.append({
-                        'type': 'subtitle',
-                        'index': index,
-                        'timestamp': timestamp,
-                        'content': '\n'.join(text_lines)
-                    })
-                else: # It's just a number in the text
-                    blocks.append({'type': 'other', 'content': line})
-            elif line:
-                blocks.append({'type': 'other', 'content': line})
-            
-            i += 1 # Move to the next line
-
-        return blocks
-    
-    def _format_subtitle_blocks(self, blocks: List[Dict[str, Any]]) -> str:
-        """Format blocks back into subtitle file content.
-
-        Args:
-            blocks: List of blocks with type and content
-
-        Returns:
-            Formatted subtitle text
-        """
-        output_lines = []
-        for block in blocks:
-            if block['type'] == 'subtitle':
-                output_lines.append(block['index'])
-                output_lines.append(block['timestamp'])
-                output_lines.append(block['content'])
-                output_lines.append('')  # Separator
-            else:
-                output_lines.append(block['content'])
-        
-        return '\n'.join(output_lines)
     
     async def close(self):
         """Close the HTTP session."""

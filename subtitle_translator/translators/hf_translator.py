@@ -7,6 +7,7 @@ from typing import Dict, Any, List, Optional, Union
 import aiohttp
 
 from .base import BaseTranslator
+from ..utils.subtitle_parser import parse_srt_blocks, format_srt_blocks
 
 logger = logging.getLogger(__name__)
 
@@ -92,27 +93,40 @@ class HFTranslator(BaseTranslator):
         Returns:
             bool: True if translation was successful, False otherwise
         """
-        # Reuse the same implementation as LocalNLLBTranslator
-        # since the file handling logic is the same
-        from .local_nllb_translator import LocalNLLBTranslator
-        
-        # Create a temporary instance to reuse the file handling logic
-        temp_translator = LocalNLLBTranslator({
-            'batch_size': self.batch_size,
-            'timeout': self.timeout.total
-        })
-        
-        # Replace the _translate_batch method with our HF-specific implementation
-        temp_translator._translate_batch = self._translate_batch
-        
-        # Use the file translation logic from LocalNLLBTranslator
-        return await temp_translator.translate_file(
-            input_file,
-            output_file,
-            source_language,
-            target_language,
-            **kwargs
-        )
+        input_path = Path(input_file)
+        output_path = Path(output_file)
+
+        try:
+            with open(input_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+        except Exception as e:
+            logger.error(f"Failed to read input file {input_path}: {e}")
+            return False
+
+        blocks = parse_srt_blocks(lines)
+        text_blocks = [block['content'] for block in blocks if block['type'] == 'subtitle']
+        block_indices = [i for i, block in enumerate(blocks) if block['type'] == 'subtitle']
+
+        if not text_blocks:
+            output_path.write_text('', encoding='utf-8')
+            return True
+
+        try:
+            translated_blocks = await self._translate_batch(
+                text_blocks,
+                source_language=source_language,
+                target_language=target_language
+            )
+
+            for i, translated in zip(block_indices, translated_blocks):
+                blocks[i]['content'] = translated
+
+            output_text = format_srt_blocks(blocks)
+            output_path.write_text(output_text, encoding='utf-8')
+            return True
+        except Exception as e:
+            logger.error(f"Translation failed: {e}", exc_info=True)
+            return False
     
     async def _translate_batch(
         self,

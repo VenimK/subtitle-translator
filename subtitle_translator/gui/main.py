@@ -372,13 +372,8 @@ class MainWindow(QMainWindow):
         settings_layout = QFormLayout(settings_group)
         
         self.translator_combo = QComboBox()
-        # Add Local NLLB first as it's the default
         self.translator_combo.addItem("Local NLLB Server", "local_nllb")
-        # Other translators
-        self.translator_combo.addItem("Hugging Face API", "huggingface")
-        self.translator_combo.addItem("DeepL", "deepl")
-        self.translator_combo.addItem("Gemini", "gemini")
-        self.translator_combo.currentIndexChanged.connect(self.on_translator_changed)
+        self.translator_combo.setEnabled(False)  # Disable selection since we only have one option
         
         self.endpoint_edit = QLineEdit()
         self.endpoint_edit.setPlaceholderText("http://localhost:8080/translate")
@@ -599,9 +594,8 @@ class MainWindow(QMainWindow):
     
     def load_settings(self):
         """Load settings from config."""
-        # Always start with Local NLLB translator
-        translator_type = 'local_nllb'
-        index = self.translator_combo.findData(translator_type)
+        # Always start with Local NLLB
+        index = self.translator_combo.findData('local_nllb')
         if index >= 0:
             self.translator_combo.setCurrentIndex(index)
         
@@ -625,7 +619,6 @@ class MainWindow(QMainWindow):
         splitter_state = self.config.get('ui.splitter_state')
         if splitter_state:
             self.centralWidget().findChild(QSplitter).restoreState(splitter_state)
-    
     def save_settings(self):
         """Save settings to config."""
         self.config.set('translator.type', self.translator_combo.currentData())
@@ -686,23 +679,9 @@ class MainWindow(QMainWindow):
     def init_translator(self):
         """Initialize the translator with current settings."""
         try:
-            # Force Local NLLB as the default translator
-            translator_type = 'local_nllb'
-            self.translator_combo.setCurrentText("Local NLLB Server")
-            api_key = ""
-            if translator_type == 'huggingface':
-                api_key = self.hf_api_key_edit.text()
-            elif translator_type == 'deepl':
-                api_key = self.deepl_api_key_edit.text()
-            elif translator_type == 'gemini':
-                api_key = self.gemini_api_key_edit.text()
-
             config = TranslationConfig(
-                translator_type=translator_type,
+                translator_type='local_nllb',
                 endpoint=self.endpoint_edit.text(),
-                api_key=api_key,
-                gemini_prompt_template=self.gemini_prompt_edit.toPlainText(),
-                gemini_tone=self.gemini_tone_edit.text(),
                 batch_size=self.batch_size_spin.value(),
                 source_language=self.source_lang_combo.currentData(),
                 target_language=self.target_lang_combo.currentData(),
@@ -715,16 +694,6 @@ class MainWindow(QMainWindow):
     
     def on_translator_changed(self):
         """Handle translator type change."""
-        translator_type = self.translator_combo.currentData()
-        is_local = (translator_type == 'local_nllb')
-        is_hf = (translator_type == 'huggingface')
-        is_deepl = (translator_type == 'deepl')
-        is_gemini = (translator_type == 'gemini')
-
-        self.endpoint_edit.setVisible(is_local)
-        self.hf_settings.setVisible(is_hf)
-        self.deepl_settings.setVisible(is_deepl)
-        self.gemini_settings.setVisible(is_gemini)
         self.init_translator()
     
     def on_settings_changed(self):

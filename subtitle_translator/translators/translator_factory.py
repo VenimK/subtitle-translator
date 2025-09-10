@@ -5,7 +5,6 @@ from typing import Dict, Type, Optional, Any
 from .base import BaseTranslator
 from .local_nllb_translator import LocalNLLBTranslator
 from .hf_translator import HFTranslator
-from .google_translator import GoogleTranslator
 from .deepl_translator import DeepLTranslator
 from .gemini_translator import GeminiTranslator
 
@@ -16,7 +15,6 @@ class TranslatorFactory:
     _translators: Dict[str, Type[BaseTranslator]] = {
         'local_nllb': LocalNLLBTranslator,
         'huggingface': HFTranslator,
-        'google': GoogleTranslator,
         'deepl': DeepLTranslator,
         'gemini': GeminiTranslator,
     }

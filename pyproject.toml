@@ -21,7 +21,6 @@ dependencies = [
     "aiohttp==3.12.15",
     "langdetect==1.0.9",
     "pysubs2==1.8.0",
-    "google-cloud-translate==3.21.1",
     "deepl==1.22.0",
     "google-generativeai==0.8.5",
 ]

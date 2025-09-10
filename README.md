@@ -9,7 +9,6 @@ A powerful and flexible subtitle translation tool that supports multiple transla
 - Multiple translation backends:
   - DeepL
   - Google Gemini
-  - Google Cloud Translate
   - Hugging Face Inference API
   - Local NLLB Server
 - Command-line interface (CLI)

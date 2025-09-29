@@ -44,7 +44,7 @@ A powerful and flexible subtitle translation tool that supports multiple transla
 
 3. **Install dependencies**:
    ```bash
-   pip install fastapi uvicorn aiohttp langdetect pysubs2 google-cloud-translate deepl google-generativeai
+   pip install fastapi uvicorn aiohttp langdetect pysubs2 google-cloud-translate deepl google-generativeai python-multipart
    ```
 
 4. **Install the package**:

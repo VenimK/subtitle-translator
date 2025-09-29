@@ -232,21 +232,199 @@ class DeepLTranslator(BaseStandaloneTranslator):
         return translated_texts
 
 class GeminiTranslator(BaseStandaloneTranslator):
-    """Gemini AI translator for standalone usage."""
+    """Gemini AI translator for standalone usage - uses real Gemini API without GUI dependencies."""
+
+    def __init__(self, config):
+        super().__init__(config)
+        self.real_translator = None
+        self._init_real_translator()
+
+    def _init_real_translator(self):
+        """Initialize the real Gemini translator without GUI dependencies."""
+        logger.info("🔧 Starting standalone Gemini translator initialization...")
+        
+        try:
+            import google.generativeai as genai
+            logger.info("✅ google.generativeai imported successfully")
+
+            # Debug the config
+            logger.info(f"🔧 Config received: {self.config}")
+            api_key = self.config.get('api_key')
+            logger.info(f"🔧 API key from config: {api_key[:10] + '...' if api_key and len(api_key) > 10 else str(api_key)}")
+
+            if not api_key:
+                logger.error("❌ No API key provided in config")
+                self.real_translator = None
+                return
+
+            # Configure Gemini directly without importing the GUI translator
+            genai.configure(api_key=api_key)
+            
+            # Get advanced configuration parameters
+            batch_size = self.config.get('batch_size', 300)
+            streaming = self.config.get('streaming', True)
+            thinking = self.config.get('thinking', True)
+            thinking_budget = self.config.get('thinking_budget', 2048)
+            temperature = self.config.get('temperature', None)
+            top_p = self.config.get('top_p', None)
+            top_k = self.config.get('top_k', None)
+            free_quota = self.config.get('free_quota', True)
+            use_colors = self.config.get('use_colors', True)
+            
+            # Create generation config with advanced parameters
+            generation_config = {}
+            if temperature is not None:
+                generation_config['temperature'] = temperature
+            if top_p is not None:
+                generation_config['top_p'] = top_p
+            if top_k is not None:
+                generation_config['top_k'] = top_k
+            
+            # Create model with advanced configuration
+            self.model = genai.GenerativeModel(
+                'gemini-2.5-flash-preview-05-20',
+                generation_config=generation_config if generation_config else None
+            )
+            
+            # Store advanced parameters
+            self.batch_size = batch_size
+            self.streaming = streaming
+            self.thinking = thinking
+            self.thinking_budget = thinking_budget
+            self.free_quota = free_quota
+            self.use_colors = use_colors
+            self.api_key = api_key
+            
+            # Set up prompt template
+            self.prompt_template = self.config.get(
+                'prompt_template',
+                "Translate the following text from {source_language} to {target_language}. Please provide only the translated text, without any additional explanations or context. Maintain the original meaning and tone as much as possible.\n\nText: {text}"
+            )
+            
+            logger.info("✅ Standalone Gemini translator initialized successfully")
+            logger.info(f"✅ Model: {self.model.model_name}")
+            logger.info(f"✅ API key available: {self.api_key is not None}")
+            logger.info(f"🔧 Advanced config - batch_size: {batch_size}, streaming: {streaming}, thinking: {thinking}")
+            logger.info(f"🔧 Generation config: {generation_config}")
+            
+            if self.api_key:
+                masked_key = f"{self.api_key[:4]}...{self.api_key[-4:]}" if len(self.api_key) > 8 else "..."
+                logger.info(f"✅ API key: {masked_key}")
+            
+            self.real_translator = self  # Use self as the translator
+
+        except ImportError as e:
+            logger.error(f"❌ Failed to import google.generativeai: {e}")
+            logger.info("💡 Make sure google-generativeai is installed: pip install google-generativeai")
+            self.real_translator = None
+        except Exception as e:
+            logger.error(f"❌ Failed to initialize Gemini translator: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            self.real_translator = None
 
     async def _translate_batch(self, texts, source_language, target_language):
-        """Translate using Gemini AI."""
-        logger.info(f"Gemini: Translating {len(texts)} texts from {source_language} to {target_language}")
-        
-        # For demo purposes, simulate translation
-        translated_texts = []
-        for text in texts:
-            # Simple demo transformation
-            translated_text = f"[GEMINI DEMO] {text}"
-            translated_texts.append(translated_text)
-            logger.info(f"Gemini: '{text}' -> '{translated_text}'")
-        
-        return translated_texts
+        """Translate using real Gemini AI API with advanced parameters."""
+        if not self.real_translator or not hasattr(self, 'model'):
+            logger.error("❌ Gemini translator not available - returning demo results")
+            logger.info("🔧 To fix: Install google-generativeai and ensure API key is valid")
+            return [f"[GEMINI DEMO - API NOT AVAILABLE] {text}" for text in texts]
+
+        try:
+            logger.info(f"🚀 Translating {len(texts)} texts with real Gemini API")
+            logger.info(f"🔧 Using batch_size: {self.batch_size}, streaming: {self.streaming}")
+            
+            translated_texts = []
+            total_tokens = 0
+            
+            # Process in batches using the configured batch_size
+            for i in range(0, len(texts), self.batch_size):
+                batch = texts[i:i + self.batch_size]
+                logger.info(f"🔧 Processing batch {i//self.batch_size + 1}: {len(batch)} texts")
+                
+                # Create batch prompt for multiple texts
+                batch_prompt = f"Translate the following texts from {source_language} to {target_language}. "
+                batch_prompt += "Please provide only the translated texts, one per line, without any additional explanations or context. "
+                batch_prompt += "Maintain the original meaning and tone as much as possible.\n\nTexts:\n"
+                
+                for j, text in enumerate(batch, 1):
+                    batch_prompt += f"{j}. {text}\n"
+                
+                try:
+                    if self.streaming:
+                        # Use streaming for better performance
+                        logger.info(f"🔧 Using streaming translation")
+                        response = await self.model.generate_content_async(
+                            batch_prompt,
+                            stream=True
+                        )
+                        
+                        full_response = ""
+                        async for chunk in response:
+                            if chunk.text:
+                                full_response += chunk.text
+                        
+                        # Parse the batch response
+                        batch_translations = self._parse_batch_response(full_response, len(batch))
+                        
+                    else:
+                        # Regular non-streaming translation
+                        response = await self.model.generate_content_async(batch_prompt)
+                        batch_translations = self._parse_batch_response(response.text, len(batch))
+                    
+                    if hasattr(response, 'usage_metadata') and response.usage_metadata:
+                        tokens = response.usage_metadata.total_token_count
+                        total_tokens += tokens
+                        logger.info(f"🔧 Batch tokens used: {tokens}")
+                    
+                    translated_texts.extend(batch_translations)
+                    logger.info(f"✅ Batch {i//self.batch_size + 1} completed: {len(batch_translations)} translations")
+                    
+                except Exception as e:
+                    logger.error(f"❌ Failed to translate batch {i//self.batch_size + 1}: {e}")
+                    # Fallback to original texts for this batch
+                    translated_texts.extend(batch)
+            
+            logger.info(f"🎉 Gemini batch translation completed! Total tokens: {total_tokens}")
+            return translated_texts
+            
+        except Exception as e:
+            logger.error(f"❌ Gemini translation failed: {e}")
+            logger.info("🔧 Check your Gemini API key and internet connection")
+            # Fallback to demo on error
+            return [f"[GEMINI DEMO - ERROR] {text}" for text in texts]
+
+    def _parse_batch_response(self, response_text: str, expected_count: int) -> List[str]:
+        """Parse batch translation response into individual translations."""
+        try:
+            lines = response_text.strip().split('\n')
+            translations = []
+            
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                    
+                # Remove numbering if present (1. 2. etc.)
+                if line and line[0].isdigit() and '. ' in line:
+                    line = line.split('. ', 1)[1]
+                
+                translations.append(line)
+            
+            # Ensure we have the expected number of translations
+            while len(translations) < expected_count:
+                translations.append(translations[-1] if translations else "")
+            
+            return translations[:expected_count]
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to parse batch response: {e}")
+            # Return empty strings as fallback
+            return [""] * expected_count
+
+    async def close(self):
+        """Close resources."""
+        pass
 
 @app.get("/", response_class=HTMLResponse)
 async def home():
@@ -401,7 +579,7 @@ async def home():
             </div>
 
             <div class="warning">
-                <strong>Note:</strong> This is a demo version. API services require valid API keys and internet connection.
+                <strong>Note:</strong> Local NLLB and API services (Google, DeepL, Gemini) require valid API keys and internet connection. Gemini AI now uses real Google Gemini API!
             </div>
 
             <form id="translateForm">
@@ -672,6 +850,10 @@ async def translate_files(
             'batch_size': 5,
             'timeout': 300
         }
+
+        # Debug: Log the config (without exposing the actual API key)
+        debug_api_key = api_key[:10] + '...' if api_key and len(api_key) > 10 else str(api_key)
+        logger.info(f"Creating translator with config: api_key='{debug_api_key}', translator='{translator}'")
 
         # Create standalone translator
         translator_instance = StandaloneTranslatorFactory.create_translator(translator, config)

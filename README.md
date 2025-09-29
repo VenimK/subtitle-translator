@@ -85,9 +85,9 @@ The easiest way to get started is using the standalone web interface:
 
 **Available Services in Web Interface**:
 - **Local NLLB Server**: Connects to your self-hosted NLLB translation server
-- **Google Translate**: Requires Google Cloud API key
-- **DeepL**: Requires DeepL API key
-- **Gemini AI**: Requires Google AI API key
+- **Google Translate**: Requires Google Cloud API key *(Demo mode available)*
+- **DeepL**: Requires DeepL API key *(Demo mode available)*
+- **Gemini AI**: Uses real Google Gemini API *(Requires API key)*
 
 ### Local NLLB Server Setup (Optional)
 

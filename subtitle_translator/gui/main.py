@@ -358,6 +358,9 @@ class MainWindow(QMainWindow):
             QListWidget::item:hover {
                 background-color: rgba(42, 130, 218, 50);
             }
+            """
+        )
+        
         self.add_files_btn = QPushButton("Add Files...")
         self.add_files_btn.clicked.connect(self.add_files)
         self.add_folder_btn = QPushButton("Add Folder...")
@@ -613,6 +616,7 @@ class MainWindow(QMainWindow):
         splitter_state = self.config.get('ui.splitter_state')
         if splitter_state:
             self.centralWidget().findChild(QSplitter).restoreState(splitter_state)
+    
     def save_settings(self):
         """Save settings to config."""
         self.config.set('translator.type', self.translator_combo.currentData())

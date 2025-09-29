@@ -487,27 +487,8 @@ class MainWindow(QMainWindow):
         
         self.translate_btn = QPushButton("Translate")
         self.translate_btn.clicked.connect(self.start_translation)
-        self.translate_btn.setStyleSheet(
-            """
-            QPushButton {
-                background-color: #2a82da;
-                color: white;
-                font-weight: bold;
-                padding: 10px;
-                border: none;
-                border-radius: 5px;
-            }
-            QPushButton:disabled {
-                background-color: #666;
-            }
-            QPushButton:hover {
-                background-color: #3a92ea;
-            }
-            QPushButton:pressed {
-                background-color: #1a72ca;
-            }
-            """
-        )
+        # Simple styling without CSS
+        self.translate_btn.setStyleSheet("background-color: #2a82da; color: white; font-weight: bold; padding: 10px; border: none; border-radius: 5px;")
         main_layout.addWidget(self.translate_btn)
         
         self.statusBar().showMessage("Ready")

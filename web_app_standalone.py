@@ -482,6 +482,39 @@ async def home():
                 border-bottom: 1px solid #ddd;
                 padding-bottom: 10px;
             }
+            .server-logs {
+                border: 1px solid #ddd;
+                border-radius: 5px;
+                padding: 15px;
+                margin: 15px 0;
+                background-color: #f8f9fa;
+                max-height: 300px;
+                overflow-y: auto;
+            }
+            .log-content {
+                font-family: 'Courier New', monospace;
+                font-size: 12px;
+                background-color: #000;
+                color: #00ff00;
+                padding: 10px;
+                border-radius: 3px;
+                max-height: 200px;
+                overflow-y: auto;
+                white-space: pre-wrap;
+            }
+            .clear-logs-btn {
+                margin-top: 10px;
+                padding: 5px 10px;
+                background-color: #dc3545;
+                color: white;
+                border: none;
+                border-radius: 3px;
+                cursor: pointer;
+                font-size: 12px;
+            }
+            .clear-logs-btn:hover {
+                background-color: #c82333;
+            }
             input, select, textarea {
                 width: 100%;
                 padding: 10px;
@@ -737,6 +770,13 @@ async def home():
                 <div id="status-text">Translating with AI services...</div>
             </div>
 
+            <!-- Real-time server logs -->
+            <div id="server-logs" class="server-logs" style="display: none;">
+                <h3>🔍 Server Activity</h3>
+                <div id="log-content" class="log-content"></div>
+                <button type="button" onclick="clearLogs()" class="clear-logs-btn">Clear Logs</button>
+            </div>
+
             <div id="results" class="file-list"></div>
         </div>
 
@@ -853,43 +893,72 @@ async def home():
 
                 console.log('📤 Sending request to /translate...');
 
-                // Show immediate progress updates
-                document.getElementById('progress-fill').style.width = '10%';
-                document.getElementById('status-text').textContent = '📡 Connecting to translation service...';
+                // Show server logs panel
+                document.getElementById('server-logs').style.display = 'block';
+                addServerLog('🚀 Starting translation process...');
+                addServerLog('📡 Connecting to ' + translator + ' service...');
 
-                // Small delay to show the connecting message
+                // Animate progress bar in 10% steps
+                let currentProgress = 0;
+                const progressInterval = setInterval(() => {
+                    currentProgress += 10;
+                    document.getElementById('progress-fill').style.width = currentProgress + '%';
+                    
+                    // Update status messages at specific progress points
+                    if (currentProgress === 10) {
+                        document.getElementById('status-text').textContent = '📡 Connecting to translation service...';
+                        addServerLog('🔌 Establishing connection...');
+                    } else if (currentProgress === 30) {
+                        document.getElementById('status-text').textContent = '🤖 AI is analyzing your subtitles...';
+                        addServerLog('🧠 AI analyzing subtitle structure...');
+                    } else if (currentProgress === 50) {
+                        document.getElementById('status-text').textContent = '🧠 AI is translating your content...';
+                        addServerLog('🔄 Processing ' + files.length + ' file(s)...');
+                    } else if (currentProgress === 70) {
+                        document.getElementById('status-text').textContent = '📝 Processing translation results...';
+                        addServerLog('📊 Parsing translation results...');
+                    } else if (currentProgress === 90) {
+                        document.getElementById('status-text').textContent = '🔄 Finalizing translations...';
+                        addServerLog('💾 Preparing download files...');
+                    }
+                    
+                    if (currentProgress >= 90) {
+                        clearInterval(progressInterval);
+                    }
+                }, 300); // Update every 300ms for smooth animation
+
+                // Small delay to show the initial connecting message
                 await new Promise(resolve => setTimeout(resolve, 500));
 
                 try {
+                    addServerLog('📤 Sending files to server...');
                     const response = await fetch('/translate', {
                         method: 'POST',
                         body: formData
                     });
 
                     console.log('📥 Response status:', response.status);
-
-                    // Update progress during processing
-                    document.getElementById('progress-fill').style.width = '50%';
-                    document.getElementById('status-text').textContent = '🤖 AI is translating your subtitles...';
+                    addServerLog('📥 Server responded with status: ' + response.status);
 
                     if (!response.ok) {
+                        clearInterval(progressInterval);
                         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                     }
 
-                    // Show parsing progress
-                    document.getElementById('progress-fill').style.width = '80%';
-                    document.getElementById('status-text').textContent = '📝 Processing translation results...';
-
+                    addServerLog('✅ Translation completed successfully!');
                     const results = await response.json();
                     
-                    // Update progress to completion
+                    // Complete progress to 100%
+                    clearInterval(progressInterval);
                     document.getElementById('progress-fill').style.width = '100%';
                     
                     if (results.success_count > 0) {
                         const totalLines = results.files.reduce((sum, file) => sum + (file.lines_translated || 0), 0);
                         document.getElementById('status-text').textContent = `✅ Successfully translated ${totalLines} subtitle lines!`;
+                        addServerLog(`🎉 Translated ${totalLines} lines across ${results.success_count} file(s)`);
                     } else {
                         document.getElementById('status-text').textContent = '❌ Translation failed - check results below';
+                        addServerLog('❌ Translation failed - check error details below');
                     }
 
                     console.log('✅ Response received:', results);
@@ -897,10 +966,12 @@ async def home():
 
                 } catch (error) {
                     console.error('❌ Error:', error);
+                    clearInterval(progressInterval);
                     document.getElementById('progress-fill').style.width = '0%';
                     document.getElementById('status-text').textContent = '❌ Error: ' + error.message;
                     document.getElementById('status-text').className = 'status error';
                     document.getElementById('status-text').style.display = 'block';
+                    addServerLog('❌ Error: ' + error.message);
                 } finally {
                     // Hide progress after 3 seconds to let user see the final message
                     setTimeout(() => {
@@ -936,7 +1007,7 @@ async def home():
                                 <h4>✅ ${file.original_name}${linesInfo}</h4>
                                 <p><strong>Translated to:</strong> ${file.translated_name}</p>
                                 <p><strong>Service:</strong> ${file.service}</p>
-                                <a href="${file.download_url}" download class="download-btn">📥 Download Translation</a>
+                                <button onclick="downloadFileSecure('${file.download_url}', '${file.translated_name}')" class="download-btn">📥 Download Translation</button>
                             </div>
                         `;
                     } else {
@@ -953,6 +1024,45 @@ async def home():
                 });
             }
 
+            function downloadFileSecure(url, filename) {
+                // Use fetch to download file securely over HTTPS
+                addServerLog('📥 Starting secure download: ' + filename);
+                fetch(url)
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                        }
+                        return response.blob();
+                    })
+                    .then(blob => {
+                        const downloadUrl = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = downloadUrl;
+                        a.download = filename;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        window.URL.revokeObjectURL(downloadUrl);
+                        addServerLog('✅ Download completed: ' + filename);
+                    })
+                    .catch(error => {
+                        console.error('Download error:', error);
+                        addServerLog('❌ Download failed: ' + error.message);
+                        alert('Download failed: ' + error.message);
+                    });
+            }
+
+            function addServerLog(message) {
+                const logContent = document.getElementById('log-content');
+                const timestamp = new Date().toLocaleTimeString();
+                logContent.textContent += `[${timestamp}] ${message}\n`;
+                logContent.scrollTop = logContent.scrollHeight;
+            }
+
+            function clearLogs() {
+                document.getElementById('log-content').textContent = '';
+            }
+
             function downloadFile(url) {
                 const a = document.createElement('a');
                 a.href = url;
@@ -964,6 +1074,8 @@ async def home():
 
             function clearResults() {
                 document.getElementById('results').innerHTML = '';
+                document.getElementById('server-logs').style.display = 'none';
+                clearLogs();
             }
 
             // Initialize form state on page load
@@ -1144,8 +1256,31 @@ async def download_file(filename: str):
 
 if __name__ == "__main__":
     import uvicorn
+    import ssl
+    import os
+    
     print("🚀 Starting Standalone Subtitle Translator...")
     print("🌐 Available services: Local NLLB, Google Translate, DeepL, Gemini AI")
-    print("📖 Open your browser and go to: http://localhost:8002")
-    print("⚠️  Note: This is a demo version. Real API services require valid API keys.")
-    uvicorn.run(app, host="0.0.0.0", port=8002)
+    
+    # Check if SSL certificates exist
+    cert_file = "cert.pem"
+    key_file = "key.pem"
+    
+    if os.path.exists(cert_file) and os.path.exists(key_file):
+        print("🔒 SSL certificates found - starting HTTPS server")
+        print("📖 Open your browser and go to: https://localhost:8002")
+        print("⚠️  You may need to accept the self-signed certificate warning")
+        
+        # Create SSL context
+        ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ssl_context.load_cert_chain(cert_file, key_file)
+        
+        uvicorn.run(app, host="0.0.0.0", port=8002, ssl_keyfile=key_file, ssl_certfile=cert_file)
+    else:
+        print("⚠️  No SSL certificates found - starting HTTP server")
+        print("📖 Open your browser and go to: http://localhost:8002")
+        print("💡 To enable HTTPS, generate certificates with:")
+        print("   openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes")
+        print("⚠️  Note: This is a demo version. Real API services require valid API keys.")
+        
+        uvicorn.run(app, host="0.0.0.0", port=8002)

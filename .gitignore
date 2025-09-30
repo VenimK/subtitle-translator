@@ -24,6 +24,8 @@ wheels/
 .installed.cfg
 *.egg
 MANIFEST
+cert.pem
+key.pem
 
 # PyInstaller
 *.manifest

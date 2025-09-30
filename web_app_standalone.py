@@ -515,6 +515,19 @@ async def home():
             .clear-logs-btn:hover {
                 background-color: #c82333;
             }
+            .clear-settings-btn {
+                background-color: #6c757d;
+                color: white;
+                border: none;
+                padding: 12px 20px;
+                border-radius: 5px;
+                cursor: pointer;
+                font-size: 16px;
+                margin-left: 10px;
+            }
+            .clear-settings-btn:hover {
+                background-color: #5a6268;
+            }
             input, select, textarea {
                 width: 100%;
                 padding: 10px;
@@ -760,6 +773,7 @@ async def home():
                 <div class="button-group">
                     <button type="submit">Translate with AI</button>
                     <button type="button" onclick="clearResults()">Clear Results</button>
+                    <button type="button" onclick="clearSavedSettings()" class="clear-settings-btn">🗑️ Clear Saved Settings</button>
                 </div>
             </form>
 
@@ -1059,6 +1073,42 @@ async def home():
                 logContent.scrollTop = logContent.scrollHeight;
             }
 
+            function showSaveNotification(message) {
+                // Add to server log if visible
+                const serverLogs = document.getElementById('server-logs');
+                if (serverLogs.style.display !== 'none') {
+                    addServerLog(message);
+                }
+                
+                // Show a brief visual notification
+                const notification = document.createElement('div');
+                notification.textContent = message;
+                notification.style.cssText = `
+                    position: fixed;
+                    top: 20px;
+                    right: 20px;
+                    background-color: #28a745;
+                    color: white;
+                    padding: 10px 15px;
+                    border-radius: 5px;
+                    font-size: 14px;
+                    z-index: 1000;
+                    opacity: 0;
+                    transition: opacity 0.3s;
+                `;
+                
+                document.body.appendChild(notification);
+                
+                // Fade in
+                setTimeout(() => notification.style.opacity = '1', 10);
+                
+                // Fade out and remove
+                setTimeout(() => {
+                    notification.style.opacity = '0';
+                    setTimeout(() => document.body.removeChild(notification), 300);
+                }, 2000);
+            }
+
             function clearLogs() {
                 document.getElementById('log-content').textContent = '';
             }
@@ -1072,6 +1122,36 @@ async def home():
                 document.body.removeChild(a);
             }
 
+            function clearSavedSettings() {
+                if (confirm('Are you sure you want to clear all saved settings including API key?')) {
+                    // Clear all localStorage items
+                    localStorage.removeItem('gemini_api_key');
+                    localStorage.removeItem('gemini_batch_size');
+                    localStorage.removeItem('gemini_temperature');
+                    localStorage.removeItem('gemini_top_p');
+                    localStorage.removeItem('gemini_top_k');
+                    localStorage.removeItem('gemini_streaming');
+                    localStorage.removeItem('gemini_thinking');
+                    localStorage.removeItem('gemini_free_quota');
+                    localStorage.removeItem('gemini_use_colors');
+                    
+                    // Reset form to defaults
+                    document.getElementById('api_key').value = '';
+                    document.getElementById('batch_size').value = '300';
+                    document.getElementById('temperature').value = '';
+                    document.getElementById('top_p').value = '';
+                    document.getElementById('top_k').value = '';
+                    document.getElementById('thinking_budget').value = '2048';
+                    document.getElementById('streaming').checked = true;
+                    document.getElementById('thinking').checked = true;
+                    document.getElementById('free_quota').checked = true;
+                    document.getElementById('use_colors').checked = true;
+                    
+                    addServerLog('🗑️ All saved settings cleared');
+                    alert('All saved settings have been cleared!');
+                }
+            }
+
             function clearResults() {
                 document.getElementById('results').innerHTML = '';
                 document.getElementById('server-logs').style.display = 'none';
@@ -1080,6 +1160,103 @@ async def home():
 
             // Initialize form state on page load
             document.addEventListener('DOMContentLoaded', function() {
+                // Load saved API key from localStorage
+                const savedApiKey = localStorage.getItem('gemini_api_key');
+                if (savedApiKey) {
+                    document.getElementById('api_key').value = savedApiKey;
+                    addServerLog('🔑 Loaded saved API key from browser storage');
+                }
+
+                // Load other saved settings
+                const savedBatchSize = localStorage.getItem('gemini_batch_size');
+                if (savedBatchSize) {
+                    document.getElementById('batch_size').value = savedBatchSize;
+                }
+
+                const savedTemperature = localStorage.getItem('gemini_temperature');
+                if (savedTemperature) {
+                    document.getElementById('temperature').value = savedTemperature;
+                }
+
+                const savedTopP = localStorage.getItem('gemini_top_p');
+                if (savedTopP) {
+                    document.getElementById('top_p').value = savedTopP;
+                }
+
+                const savedTopK = localStorage.getItem('gemini_top_k');
+                if (savedTopK) {
+                    document.getElementById('top_k').value = savedTopK;
+                }
+
+                // Load checkbox settings
+                const savedStreaming = localStorage.getItem('gemini_streaming');
+                if (savedStreaming !== null) {
+                    document.getElementById('streaming').checked = savedStreaming === 'true';
+                }
+
+                const savedThinking = localStorage.getItem('gemini_thinking');
+                if (savedThinking !== null) {
+                    document.getElementById('thinking').checked = savedThinking === 'true';
+                }
+
+                const savedFreeQuota = localStorage.getItem('gemini_free_quota');
+                if (savedFreeQuota !== null) {
+                    document.getElementById('free_quota').checked = savedFreeQuota === 'true';
+                }
+
+                const savedUseColors = localStorage.getItem('gemini_use_colors');
+                if (savedUseColors !== null) {
+                    document.getElementById('use_colors').checked = savedUseColors === 'true';
+                }
+
+                // Add event listeners to save settings when they change
+                document.getElementById('api_key').addEventListener('input', function() {
+                    if (this.value.trim()) {
+                        localStorage.setItem('gemini_api_key', this.value);
+                        showSaveNotification('🔑 API key saved');
+                    }
+                });
+
+                document.getElementById('batch_size').addEventListener('input', function() {
+                    localStorage.setItem('gemini_batch_size', this.value);
+                    showSaveNotification('⚙️ Batch size saved');
+                });
+
+                document.getElementById('temperature').addEventListener('input', function() {
+                    localStorage.setItem('gemini_temperature', this.value);
+                    showSaveNotification('🌡️ Temperature saved');
+                });
+
+                document.getElementById('top_p').addEventListener('input', function() {
+                    localStorage.setItem('gemini_top_p', this.value);
+                    showSaveNotification('🎯 Top P saved');
+                });
+
+                document.getElementById('top_k').addEventListener('input', function() {
+                    localStorage.setItem('gemini_top_k', this.value);
+                    showSaveNotification('🔢 Top K saved');
+                });
+
+                document.getElementById('streaming').addEventListener('change', function() {
+                    localStorage.setItem('gemini_streaming', this.checked);
+                    showSaveNotification('📡 Streaming setting saved');
+                });
+
+                document.getElementById('thinking').addEventListener('change', function() {
+                    localStorage.setItem('gemini_thinking', this.checked);
+                    showSaveNotification('🧠 Thinking setting saved');
+                });
+
+                document.getElementById('free_quota').addEventListener('change', function() {
+                    localStorage.setItem('gemini_free_quota', this.checked);
+                    showSaveNotification('💰 Free quota setting saved');
+                });
+
+                document.getElementById('use_colors').addEventListener('change', function() {
+                    localStorage.setItem('gemini_use_colors', this.checked);
+                    showSaveNotification('🎨 Color setting saved');
+                });
+
                 // Trigger the translator change event to show/hide appropriate fields
                 const translatorSelect = document.getElementById('translator');
                 if (translatorSelect.onchange) {

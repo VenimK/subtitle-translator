@@ -42,12 +42,7 @@ A powerful and flexible subtitle translation tool that supports multiple transla
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
 
-3. **Install dependencies**:
-   ```bash
-   pip install fastapi uvicorn aiohttp langdetect pysubs2 google-cloud-translate deepl google-generativeai python-multipart
-   ```
-
-4. **Install the package**:
+3. **Install the package** (includes all dependencies):
    ```bash
    pip install -e .
    ```
@@ -66,6 +61,26 @@ For development with all optional dependencies:
 pip install -e ".[dev]"
 ```
 
+### Upgrading Existing Installations
+
+If you have an existing installation and want to upgrade to the latest version with all new features (including WebSocket support for real-time logging):
+
+```bash
+# Navigate to your installation directory
+cd /path/to/subtitle-translator
+
+# Activate your virtual environment
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Upgrade to latest version
+pip install -e . --upgrade
+
+# Or for GUI version
+pip install -e ".[gui]" --upgrade
+```
+
+**Note**: The upgrade will automatically install new dependencies like `fastapi`, `uvicorn`, `websockets`, and `python-multipart` for the enhanced web interface.
+
 ## Quick Start
 
 ### Standalone Web Interface (Recommended)
@@ -79,15 +94,23 @@ The easiest way to get started is using the standalone web interface:
    python web_app_standalone.py
    ```
 
-2. **Open your browser** and go to: `http://localhost:8002`
+2. **Open your browser** and go to: `http://localhost:8002` (or `https://localhost:8002` for HTTPS)
 
 3. **Upload subtitle files** and select your translation service
+
+4. **Optional**: Click "📡 Connect to Detailed Logs" for real-time backend progress
 
 **Available Services in Web Interface**:
 - **Local NLLB Server**: Connects to your self-hosted NLLB translation server
 - **Google Translate**: Requires Google Cloud API key *(Demo mode available)*
 - **DeepL**: Requires DeepL API key *(Demo mode available)*
-- **Gemini AI**: Uses real Google Gemini API *(Requires API key)*
+- **Gemini AI**: Uses real Google Gemini API with advanced settings *(Requires API key)*
+
+**New Features**:
+- **HTTPS Support**: Secure connections with auto-generated certificates
+- **Real-time Logging**: WebSocket-based live progress updates
+- **Advanced Gemini Settings**: Batch size, temperature, streaming, thinking mode
+- **Persistent Settings**: API keys and preferences saved in browser
 
 ### Local NLLB Server Setup (Optional)
 

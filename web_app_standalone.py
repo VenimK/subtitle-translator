@@ -1,7 +1,8 @@
 """Standalone web interface for subtitle translator - no GUI dependencies."""
 
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
 import asyncio
 import logging
 from pathlib import Path
@@ -11,6 +12,9 @@ import os
 import sys
 import traceback
 import pysubs2
+import json
+import time
+from datetime import datetime
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -18,10 +22,60 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Subtitle Translator", description="Translate subtitle files using AI services")
 
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Create temporary directory for uploads
 UPLOAD_DIR = Path(tempfile.mkdtemp())
 OUTPUT_DIR = UPLOAD_DIR / "output"
 OUTPUT_DIR.mkdir(exist_ok=True)
+
+# Global variable to store connected clients for real-time logging
+connected_clients = set()
+
+class WebSocketLogger:
+    """Custom logger that broadcasts messages to connected web clients."""
+    
+    def __init__(self):
+        self.clients = set()
+    
+    def add_client(self, client):
+        self.clients.add(client)
+    
+    def remove_client(self, client):
+        self.clients.discard(client)
+    
+    async def broadcast_log(self, message: str, level: str = "INFO"):
+        """Broadcast log message to all connected clients."""
+        if not self.clients:
+            return
+            
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        log_entry = {
+            "timestamp": timestamp,
+            "level": level,
+            "message": message
+        }
+        
+        # Remove disconnected clients
+        disconnected = set()
+        for client in self.clients.copy():
+            try:
+                await client.send_text(json.dumps(log_entry))
+            except:
+                disconnected.add(client)
+        
+        for client in disconnected:
+            self.clients.discard(client)
+
+# Global WebSocket logger instance
+websocket_logger = WebSocketLogger()
 
 # Simple translator factory for standalone usage
 class StandaloneTranslatorFactory:
@@ -333,7 +387,9 @@ class GeminiTranslator(BaseStandaloneTranslator):
 
         try:
             logger.info(f"🚀 Translating {len(texts)} texts with real Gemini API")
+            await websocket_logger.broadcast_log(f"🚀 Translating {len(texts)} texts with real Gemini API")
             logger.info(f"🔧 Using batch_size: {self.batch_size}, streaming: {self.streaming}")
+            await websocket_logger.broadcast_log(f"🔧 Using batch_size: {self.batch_size}, streaming: {self.streaming}")
             
             translated_texts = []
             total_tokens = 0
@@ -342,6 +398,7 @@ class GeminiTranslator(BaseStandaloneTranslator):
             for i in range(0, len(texts), self.batch_size):
                 batch = texts[i:i + self.batch_size]
                 logger.info(f"🔧 Processing batch {i//self.batch_size + 1}: {len(batch)} texts")
+                await websocket_logger.broadcast_log(f"🔧 Processing batch {i//self.batch_size + 1}: {len(batch)} texts")
                 
                 # Create batch prompt for multiple texts
                 batch_prompt = f"Translate the following texts from {source_language} to {target_language}. "
@@ -355,6 +412,7 @@ class GeminiTranslator(BaseStandaloneTranslator):
                     if self.streaming:
                         # Use streaming for better performance
                         logger.info(f"🔧 Using streaming translation")
+                        await websocket_logger.broadcast_log(f"🔧 Using streaming translation")
                         response = await self.model.generate_content_async(
                             batch_prompt,
                             stream=True
@@ -377,16 +435,20 @@ class GeminiTranslator(BaseStandaloneTranslator):
                         tokens = response.usage_metadata.total_token_count
                         total_tokens += tokens
                         logger.info(f"🔧 Batch tokens used: {tokens}")
+                        await websocket_logger.broadcast_log(f"🔧 Batch tokens used: {tokens}")
                     
                     translated_texts.extend(batch_translations)
                     logger.info(f"✅ Batch {i//self.batch_size + 1} completed: {len(batch_translations)} translations")
+                    await websocket_logger.broadcast_log(f"✅ Batch {i//self.batch_size + 1} completed: {len(batch_translations)} translations")
                     
                 except Exception as e:
                     logger.error(f"❌ Failed to translate batch {i//self.batch_size + 1}: {e}")
+                    await websocket_logger.broadcast_log(f"❌ Failed to translate batch {i//self.batch_size + 1}: {e}", "ERROR")
                     # Fallback to original texts for this batch
                     translated_texts.extend(batch)
             
             logger.info(f"🎉 Gemini batch translation completed! Total tokens: {total_tokens}")
+            await websocket_logger.broadcast_log(f"🎉 Gemini batch translation completed! Total tokens: {total_tokens}")
             return translated_texts
             
         except Exception as e:
@@ -426,6 +488,37 @@ class GeminiTranslator(BaseStandaloneTranslator):
     async def close(self):
         """Close resources."""
         pass
+
+@app.websocket("/ws/logs")
+async def websocket_logs(websocket: WebSocket):
+    """WebSocket endpoint for real-time server logs."""
+    try:
+        await websocket.accept()
+        websocket_logger.add_client(websocket)
+        logger.info("🔌 WebSocket client connected for real-time logs")
+        
+        # Send initial connection message
+        await websocket_logger.broadcast_log("🔌 Connected to real-time server logs", "INFO")
+        
+        # Keep connection alive and handle ping/pong
+        while True:
+            try:
+                # Wait for messages (ping/pong or close)
+                message = await websocket.receive_text()
+                # Echo back for keep-alive
+                if message == "ping":
+                    await websocket.send_text("pong")
+            except Exception as e:
+                logger.info(f"WebSocket receive error (client likely disconnected): {e}")
+                break
+                
+    except WebSocketDisconnect:
+        logger.info("🔌 WebSocket client disconnected normally")
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+    finally:
+        websocket_logger.remove_client(websocket)
+        logger.info("🔌 WebSocket client removed from logger")
 
 @app.get("/", response_class=HTMLResponse)
 async def home():
@@ -527,6 +620,29 @@ async def home():
             }
             .clear-settings-btn:hover {
                 background-color: #5a6268;
+            }
+            .log-controls {
+                margin-bottom: 10px;
+                display: flex;
+                gap: 10px;
+            }
+            .toggle-logs-btn {
+                background-color: #007bff;
+                color: white;
+                border: none;
+                padding: 8px 12px;
+                border-radius: 3px;
+                cursor: pointer;
+                font-size: 12px;
+            }
+            .toggle-logs-btn:hover {
+                background-color: #0056b3;
+            }
+            .toggle-logs-btn.connected {
+                background-color: #28a745;
+            }
+            .toggle-logs-btn.connected:hover {
+                background-color: #1e7e34;
             }
             input, select, textarea {
                 width: 100%;
@@ -787,14 +903,122 @@ async def home():
             <!-- Real-time server logs -->
             <div id="server-logs" class="server-logs" style="display: none;">
                 <h3>🔍 Server Activity</h3>
+                <div class="log-controls">
+                    <button type="button" onclick="toggleDetailedLogs()" id="detailed-logs-btn" class="toggle-logs-btn">📡 Connect to Detailed Logs</button>
+                    <button type="button" onclick="clearLogs()" class="clear-logs-btn">Clear Logs</button>
+                </div>
                 <div id="log-content" class="log-content"></div>
-                <button type="button" onclick="clearLogs()" class="clear-logs-btn">Clear Logs</button>
             </div>
 
             <div id="results" class="file-list"></div>
         </div>
 
         <script>
+            // WebSocket connection for real-time logs
+            let websocket = null;
+            let isDetailedLogsEnabled = false;
+            let keepAliveInterval = null;
+
+            function startKeepAlive() {
+                keepAliveInterval = setInterval(() => {
+                    if (websocket && websocket.readyState === WebSocket.OPEN) {
+                        websocket.send('ping');
+                    }
+                }, 30000); // Send ping every 30 seconds
+            }
+
+            function stopKeepAlive() {
+                if (keepAliveInterval) {
+                    clearInterval(keepAliveInterval);
+                    keepAliveInterval = null;
+                }
+            }
+
+            function toggleDetailedLogs() {
+                const btn = document.getElementById('detailed-logs-btn');
+                
+                if (!isDetailedLogsEnabled) {
+                    // Connect to WebSocket
+                    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                    const wsUrl = `${protocol}//${window.location.host}/ws/logs`;
+                    
+                    addServerLog('🔄 Connecting to detailed server logs...');
+                    btn.textContent = '🔄 Connecting...';
+                    btn.disabled = true;
+                    
+                    try {
+                        websocket = new WebSocket(wsUrl);
+                        
+                        websocket.onopen = function() {
+                            isDetailedLogsEnabled = true;
+                            btn.textContent = '🔌 Disconnect Detailed Logs';
+                            btn.classList.add('connected');
+                            btn.disabled = false;
+                            addServerLog('✅ Connected to real-time detailed server logs');
+                            startKeepAlive();
+                        };
+                        
+                        websocket.onmessage = function(event) {
+                            try {
+                                const logEntry = JSON.parse(event.data);
+                                const logContent = document.getElementById('log-content');
+                                const levelColor = logEntry.level === 'ERROR' ? '#ff6b6b' : '#00ff00';
+                                logContent.innerHTML += `<span style="color: ${levelColor}">[${logEntry.timestamp}] ${logEntry.message}</span>\n`;
+                                logContent.scrollTop = logContent.scrollHeight;
+                            } catch (e) {
+                                console.error('Error parsing WebSocket message:', e);
+                            }
+                        };
+                        
+                        websocket.onclose = function(event) {
+                            isDetailedLogsEnabled = false;
+                            btn.textContent = '📡 Connect to Detailed Logs';
+                            btn.classList.remove('connected');
+                            btn.disabled = false;
+                            stopKeepAlive();
+                            
+                            if (event.code !== 1000) {
+                                addServerLog('❌ WebSocket connection closed unexpectedly (code: ' + event.code + ')');
+                            } else {
+                                addServerLog('🔌 Disconnected from detailed server logs');
+                            }
+                        };
+                        
+                        websocket.onerror = function(error) {
+                            console.error('WebSocket error:', error);
+                            addServerLog('❌ WebSocket connection failed - check server status');
+                            btn.textContent = '📡 Connect to Detailed Logs';
+                            btn.classList.remove('connected');
+                            btn.disabled = false;
+                            isDetailedLogsEnabled = false;
+                            stopKeepAlive();
+                        };
+                        
+                        // Connection timeout
+                        setTimeout(() => {
+                            if (websocket && websocket.readyState === WebSocket.CONNECTING) {
+                                websocket.close();
+                                addServerLog('❌ WebSocket connection timeout');
+                                btn.textContent = '📡 Connect to Detailed Logs';
+                                btn.disabled = false;
+                            }
+                        }, 5000);
+                        
+                    } catch (error) {
+                        console.error('Failed to create WebSocket:', error);
+                        addServerLog('❌ Failed to create WebSocket connection');
+                        btn.textContent = '📡 Connect to Detailed Logs';
+                        btn.disabled = false;
+                    }
+                } else {
+                    // Disconnect WebSocket
+                    if (websocket) {
+                        stopKeepAlive();
+                        websocket.close(1000, 'User disconnected');
+                    }
+                }
+            }
+
             // Show/hide endpoint field based on translator selection
             document.getElementById('translator').onchange = function() {
                 const endpointGroup = document.getElementById('endpoint-group');
@@ -1342,12 +1566,15 @@ async def translate_files(
         for i, input_file in enumerate(saved_files, 1):
             try:
                 logger.info(f"📁 Processing file {i}/{len(saved_files)}: {input_file.name}")
+                await websocket_logger.broadcast_log(f"📁 Processing file {i}/{len(saved_files)}: {input_file.name}")
                 
                 # Create output filename
                 output_file = OUTPUT_DIR / f"{input_file.stem}_{target_lang}{input_file.suffix}"
 
                 logger.info(f"🔄 Translating: {input_file.name} -> {output_file.name}")
+                await websocket_logger.broadcast_log(f"🔄 Translating: {input_file.name} -> {output_file.name}")
                 logger.info(f"🌐 Service: {translator}, Languages: {source_lang} -> {target_lang}")
+                await websocket_logger.broadcast_log(f"🌐 Service: {translator}, Languages: {source_lang} -> {target_lang}")
                 
                 # Translate the file
                 result = await translator_instance.translate_file(input_file, source_lang, target_lang)
@@ -1355,21 +1582,27 @@ async def translate_files(
                 if result:
                     original_subs, translated_subs = result
                     logger.info(f"📊 Translation result: ({type(original_subs).__name__} with {len(original_subs)} events, {type(translated_subs).__name__} with {len(translated_subs)} events)")
+                    await websocket_logger.broadcast_log(f"📊 Translation result: ({type(original_subs).__name__} with {len(original_subs)} events, {type(translated_subs).__name__} with {len(translated_subs)} events)")
                     logger.info(f"📊 Result type: {type(result)}")
                     logger.info(f"📊 Result length: {len(result)}")
                     
                     # Save translated file
                     translated_subs.save(str(output_file))
                     logger.info(f"💾 Saved file: {output_file}")
+                    await websocket_logger.broadcast_log(f"💾 Saved file: {output_file.name}")
                     
                     # Log some sample translations for verification
                     logger.info("🔍 Translation successful!")
+                    await websocket_logger.broadcast_log("🔍 Translation successful!")
                     logger.info(f"🔍 Original subs: {len(original_subs)} events")
+                    await websocket_logger.broadcast_log(f"🔍 Original subs: {len(original_subs)} events")
                     logger.info(f"🔍 Translated subs: {len(translated_subs)} events")
+                    await websocket_logger.broadcast_log(f"🔍 Translated subs: {len(translated_subs)} events")
                     
                     # Show first few translations as examples
                     for j, (orig, trans) in enumerate(zip(original_subs[:3], translated_subs[:3]), 1):
                         logger.info(f"🔍 Translated line {j}: '{trans.plaintext}'")
+                        await websocket_logger.broadcast_log(f"🔍 Translated line {j}: '{trans.plaintext}'")
                     
                     success_count += 1
                     results.append({
@@ -1382,6 +1615,7 @@ async def translate_files(
                     })
                 else:
                     logger.error(f"❌ Translation failed for {input_file.name}: No result returned")
+                    await websocket_logger.broadcast_log(f"❌ Translation failed for {input_file.name}: No result returned", "ERROR")
                     results.append({
                         "original_name": input_file.name,
                         "success": False,
@@ -1391,6 +1625,7 @@ async def translate_files(
 
             except Exception as e:
                 logger.error(f"❌ Error processing {input_file.name}: {e}")
+                await websocket_logger.broadcast_log(f"❌ Error processing {input_file.name}: {e}", "ERROR")
                 import traceback
                 logger.error(f"❌ Traceback: {traceback.format_exc()}")
                 results.append({

@@ -237,6 +237,7 @@ class GeminiTranslator(BaseStandaloneTranslator):
     def __init__(self, config):
         super().__init__(config)
         self.real_translator = None
+        # Don't set batch_size here yet - let _init_real_translator handle it
         self._init_real_translator()
 
     def _init_real_translator(self):
@@ -286,8 +287,8 @@ class GeminiTranslator(BaseStandaloneTranslator):
                 generation_config=generation_config if generation_config else None
             )
             
-            # Store advanced parameters
-            self.batch_size = batch_size
+            # Store advanced parameters - OVERRIDE the base class batch_size
+            self.batch_size = batch_size  # This will override the base class default of 5
             self.streaming = streaming
             self.thinking = thinking
             self.thinking_budget = thinking_budget
@@ -458,17 +459,28 @@ async def home():
             .subtitle {
                 text-align: center;
                 color: #28a745;
-                margin-bottom: 30px;
-                font-weight: bold;
             }
             .form-group {
                 margin-bottom: 20px;
             }
-            label {
+            .form-group small {
                 display: block;
-                margin-bottom: 5px;
-                font-weight: bold;
-                color: #555;
+                color: #666;
+                font-size: 12px;
+                margin-top: 5px;
+            }
+            .advanced-settings {
+                border: 1px solid #ddd;
+                border-radius: 5px;
+                padding: 15px;
+                margin: 15px 0;
+                background-color: #f9f9f9;
+            }
+            .advanced-settings h3 {
+                margin-top: 0;
+                color: #333;
+                border-bottom: 1px solid #ddd;
+                padding-bottom: 10px;
             }
             input, select, textarea {
                 width: 100%;
@@ -645,6 +657,73 @@ async def home():
                     <input type="url" id="endpoint" name="endpoint" value="http://192.168.1.233:6060/translate" placeholder="http://192.168.1.233:6060/translate">
                 </div>
 
+                <!-- Advanced Gemini Settings -->
+                <div id="gemini-settings" class="advanced-settings" style="display: none;">
+                    <h3>🤖 Advanced Gemini Settings</h3>
+                    
+                    <div class="form-group">
+                        <label for="batch_size">Batch Size:</label>
+                        <input type="number" id="batch_size" name="batch_size" value="300" min="1" max="500" title="Number of texts to translate in one API call">
+                        <small>Higher values = faster translation but more tokens per request</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="streaming" name="streaming" checked>
+                            Enable Streaming
+                        </label>
+                        <small>Stream responses for better performance</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="thinking" name="thinking" checked>
+                            Enable Thinking Mode
+                        </label>
+                        <small>Allow model to think before responding</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="thinking_budget">Thinking Budget:</label>
+                        <input type="number" id="thinking_budget" name="thinking_budget" value="2048" min="512" max="8192" title="Token budget for thinking">
+                        <small>Tokens allocated for model thinking (512-8192)</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="temperature">Temperature:</label>
+                        <input type="number" id="temperature" name="temperature" step="0.1" min="0" max="2" placeholder="Auto (leave empty)" title="Controls randomness (0.0-2.0)">
+                        <small>0.0 = deterministic, 1.0 = balanced, 2.0 = creative</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="top_p">Top P:</label>
+                        <input type="number" id="top_p" name="top_p" step="0.1" min="0" max="1" placeholder="Auto (leave empty)" title="Nucleus sampling (0.0-1.0)">
+                        <small>Controls diversity of word selection</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="top_k">Top K:</label>
+                        <input type="number" id="top_k" name="top_k" min="1" max="100" placeholder="Auto (leave empty)" title="Limits vocabulary selection">
+                        <small>Number of top tokens to consider</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="free_quota" name="free_quota" checked>
+                            Use Free Quota
+                        </label>
+                        <small>Prioritize free tier usage</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="use_colors" name="use_colors" checked>
+                            Use Colors in Output
+                        </label>
+                        <small>Enable colored console output</small>
+                    </div>
+                </div>
+
                 <div class="button-group">
                     <button type="submit">Translate with AI</button>
                     <button type="button" onclick="clearResults()">Clear Results</button>
@@ -665,13 +744,20 @@ async def home():
             // Show/hide endpoint field based on translator selection
             document.getElementById('translator').onchange = function() {
                 const endpointGroup = document.getElementById('endpoint-group');
+                const geminiSettings = document.getElementById('gemini-settings');
                 const apiKeyField = document.getElementById('api_key').closest('.form-group');
                 
                 if (this.value === 'local_nllb') {
                     endpointGroup.style.display = 'block';
+                    geminiSettings.style.display = 'none';
                     apiKeyField.style.display = 'none';
+                } else if (this.value === 'gemini') {
+                    endpointGroup.style.display = 'none';
+                    geminiSettings.style.display = 'block';
+                    apiKeyField.style.display = 'block';
                 } else {
                     endpointGroup.style.display = 'none';
+                    geminiSettings.style.display = 'none';
                     apiKeyField.style.display = 'block';
                 }
             };
@@ -713,17 +799,52 @@ async def home():
                 const apiKey = document.getElementById('api_key').value;
                 const endpoint = document.getElementById('endpoint').value;
 
+                // Add advanced Gemini parameters
+                const batchSize = document.getElementById('batch_size').value;
+                const streaming = document.getElementById('streaming').checked;
+                const thinking = document.getElementById('thinking').checked;
+                const thinkingBudget = document.getElementById('thinking_budget').value;
+                const temperature = document.getElementById('temperature').value;
+                const topP = document.getElementById('top_p').value;
+                const topK = document.getElementById('top_k').value;
+                const freeQuota = document.getElementById('free_quota').checked;
+                const useColors = document.getElementById('use_colors').checked;
+
                 console.log('🌐 Source language:', sourceLang);
                 console.log('🌐 Target language:', targetLang);
                 console.log('🤖 Translator:', translator);
                 console.log('🔑 API Key:', apiKey ? '***provided***' : 'not provided');
                 console.log('🔗 Endpoint:', endpoint);
+                
+                if (translator === 'gemini') {
+                    console.log('🤖 Gemini Settings:');
+                    console.log('  - Batch Size:', batchSize);
+                    console.log('  - Streaming:', streaming);
+                    console.log('  - Thinking:', thinking);
+                    console.log('  - Thinking Budget:', thinkingBudget);
+                    console.log('  - Temperature:', temperature || 'auto');
+                    console.log('  - Top P:', topP || 'auto');
+                    console.log('  - Top K:', topK || 'auto');
+                    console.log('  - Free Quota:', freeQuota);
+                    console.log('  - Use Colors:', useColors);
+                }
 
                 formData.append('source_lang', sourceLang);
                 formData.append('target_lang', targetLang);
                 formData.append('translator', translator);
                 formData.append('api_key', apiKey);
                 formData.append('endpoint', endpoint);
+                
+                // Add advanced Gemini parameters to form data
+                formData.append('batch_size', batchSize);
+                formData.append('streaming', streaming);
+                formData.append('thinking', thinking);
+                formData.append('thinking_budget', thinkingBudget);
+                formData.append('temperature', temperature);
+                formData.append('top_p', topP);
+                formData.append('top_k', topK);
+                formData.append('free_quota', freeQuota);
+                formData.append('use_colors', useColors);
 
                 // Show progress
                 document.getElementById('progress').style.display = 'block';
@@ -731,6 +852,13 @@ async def home():
                 document.getElementById('status-text').textContent = '🚀 Initializing translation service...';
 
                 console.log('📤 Sending request to /translate...');
+
+                // Show immediate progress updates
+                document.getElementById('progress-fill').style.width = '10%';
+                document.getElementById('status-text').textContent = '📡 Connecting to translation service...';
+
+                // Small delay to show the connecting message
+                await new Promise(resolve => setTimeout(resolve, 500));
 
                 try {
                     const response = await fetch('/translate', {
@@ -740,21 +868,44 @@ async def home():
 
                     console.log('📥 Response status:', response.status);
 
+                    // Update progress during processing
+                    document.getElementById('progress-fill').style.width = '50%';
+                    document.getElementById('status-text').textContent = '🤖 AI is translating your subtitles...';
+
                     if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                     }
 
+                    // Show parsing progress
+                    document.getElementById('progress-fill').style.width = '80%';
+                    document.getElementById('status-text').textContent = '📝 Processing translation results...';
+
                     const results = await response.json();
+                    
+                    // Update progress to completion
+                    document.getElementById('progress-fill').style.width = '100%';
+                    
+                    if (results.success_count > 0) {
+                        const totalLines = results.files.reduce((sum, file) => sum + (file.lines_translated || 0), 0);
+                        document.getElementById('status-text').textContent = `✅ Successfully translated ${totalLines} subtitle lines!`;
+                    } else {
+                        document.getElementById('status-text').textContent = '❌ Translation failed - check results below';
+                    }
+
                     console.log('✅ Response received:', results);
                     displayResults(results);
 
                 } catch (error) {
                     console.error('❌ Error:', error);
+                    document.getElementById('progress-fill').style.width = '0%';
                     document.getElementById('status-text').textContent = '❌ Error: ' + error.message;
                     document.getElementById('status-text').className = 'status error';
                     document.getElementById('status-text').style.display = 'block';
                 } finally {
-                    document.getElementById('progress').style.display = 'none';
+                    // Hide progress after 3 seconds to let user see the final message
+                    setTimeout(() => {
+                        document.getElementById('progress').style.display = 'none';
+                    }, 3000);
                 }
             };
 
@@ -777,19 +928,27 @@ async def home():
                 results.files.forEach(file => {
                     const fileDiv = document.createElement('div');
                     fileDiv.className = 'file-item';
-
+                    
                     if (file.success) {
+                        const linesInfo = file.lines_translated ? ` (${file.lines_translated} lines)` : '';
                         fileDiv.innerHTML = `
-                            <strong>${file.original_name}</strong> → <strong>${file.translated_name}</strong>
-                            <button class="download-btn" onclick="downloadFile('${file.download_url}')">Download</button>
+                            <div class="file-success">
+                                <h4>✅ ${file.original_name}${linesInfo}</h4>
+                                <p><strong>Translated to:</strong> ${file.translated_name}</p>
+                                <p><strong>Service:</strong> ${file.service}</p>
+                                <a href="${file.download_url}" download class="download-btn">📥 Download Translation</a>
+                            </div>
                         `;
                     } else {
                         fileDiv.innerHTML = `
-                            <strong>${file.original_name}</strong> - Error: ${file.error}
+                            <div class="file-error">
+                                <h4>❌ ${file.original_name}</h4>
+                                <p><strong>Error:</strong> ${file.error}</p>
+                                <p><strong>Service:</strong> ${file.service}</p>
+                            </div>
                         `;
-                        fileDiv.style.borderLeftColor = '#dc3545';
                     }
-
+                    
                     resultsDiv.appendChild(fileDiv);
                 });
             }
@@ -806,6 +965,15 @@ async def home():
             function clearResults() {
                 document.getElementById('results').innerHTML = '';
             }
+
+            // Initialize form state on page load
+            document.addEventListener('DOMContentLoaded', function() {
+                // Trigger the translator change event to show/hide appropriate fields
+                const translatorSelect = document.getElementById('translator');
+                if (translatorSelect.onchange) {
+                    translatorSelect.onchange();
+                }
+            });
         </script>
     </body>
     </html>
@@ -818,7 +986,17 @@ async def translate_files(
     target_lang: str = Form(...),
     translator: str = Form("local_nllb"),
     api_key: Optional[str] = Form(None),
-    endpoint: Optional[str] = Form(None)
+    endpoint: Optional[str] = Form(None),
+    # Advanced Gemini parameters
+    batch_size: Optional[str] = Form("300"),
+    streaming: Optional[str] = Form("true"),
+    thinking: Optional[str] = Form("true"),
+    thinking_budget: Optional[str] = Form("2048"),
+    temperature: Optional[str] = Form(""),
+    top_p: Optional[str] = Form(""),
+    top_k: Optional[str] = Form(""),
+    free_quota: Optional[str] = Form("true"),
+    use_colors: Optional[str] = Form("true")
 ):
     """Translate uploaded subtitle files using standalone AI services."""
     try:
@@ -843,82 +1021,89 @@ async def translate_files(
         if not saved_files:
             raise HTTPException(status_code=400, detail="No valid subtitle files uploaded")
 
-        # Create translator config
+        # Create translator config with user-provided parameters
         config = {
             'api_key': api_key,
             'endpoint': endpoint or 'http://192.168.1.233:6060/translate',
-            'batch_size': 5,
-            'timeout': 300
+            'batch_size': int(batch_size) if batch_size else 300,
+            'timeout': 300,
+            'streaming': streaming.lower() == 'true' if streaming else True,
+            'thinking': thinking.lower() == 'true' if thinking else True,
+            'thinking_budget': int(thinking_budget) if thinking_budget else 2048,
+            'temperature': float(temperature) if temperature else None,
+            'top_p': float(top_p) if top_p else None,
+            'top_k': int(top_k) if top_k else None,
+            'free_quota': free_quota.lower() == 'true' if free_quota else True,
+            'use_colors': use_colors.lower() == 'true' if use_colors else True
         }
 
         # Debug: Log the config (without exposing the actual API key)
         debug_api_key = api_key[:10] + '...' if api_key and len(api_key) > 10 else str(api_key)
-        logger.info(f"Creating translator with config: api_key='{debug_api_key}', translator='{translator}'")
+        logger.info(f"🔧 Creating translator with config: api_key='{debug_api_key}', translator='{translator}'")
+        logger.info(f"🔧 Advanced settings: batch_size={config['batch_size']}, streaming={config['streaming']}")
 
         # Create standalone translator
         translator_instance = StandaloneTranslatorFactory.create_translator(translator, config)
-        logger.info(f"Created {translator} translator successfully")
+        logger.info(f"✅ Created {translator} translator successfully")
 
         results = []
         success_count = 0
 
         # Process each file
-        for input_file in saved_files:
+        for i, input_file in enumerate(saved_files, 1):
             try:
+                logger.info(f"📁 Processing file {i}/{len(saved_files)}: {input_file.name}")
+                
                 # Create output filename
                 output_file = OUTPUT_DIR / f"{input_file.stem}_{target_lang}{input_file.suffix}"
 
-                logger.info(f"Translating: {input_file} -> {output_file}")
-                logger.info(f"Service: {translator}, Languages: {source_lang} -> {target_lang}")
-
-                # Perform translation
-                result = await translator_instance.translate_file(
-                    input_file,
-                    source_language=source_lang,
-                    target_language=target_lang
-                )
-
-                logger.info(f"Translation result: {result}")
-                logger.info(f"Result type: {type(result)}")
-                logger.info(f"Result length: {len(result) if result else 'None'}")
-
-                if result and len(result) == 2:
+                logger.info(f"🔄 Translating: {input_file.name} -> {output_file.name}")
+                logger.info(f"🌐 Service: {translator}, Languages: {source_lang} -> {target_lang}")
+                
+                # Translate the file
+                result = await translator_instance.translate_file(input_file, source_lang, target_lang)
+                
+                if result:
                     original_subs, translated_subs = result
-
-                    print(f"🔍 Translation successful!")
-                    print(f"🔍 Original subs: {len(original_subs)} events")
-                    print(f"🔍 Translated subs: {len(translated_subs)} events")
+                    logger.info(f"📊 Translation result: ({type(original_subs).__name__} with {len(original_subs)} events, {type(translated_subs).__name__} with {len(translated_subs)} events)")
+                    logger.info(f"📊 Result type: {type(result)}")
+                    logger.info(f"📊 Result length: {len(result)}")
                     
-                    # Check first few translated lines
-                    for i, event in enumerate(translated_subs[:3]):
-                        print(f"🔍 Translated line {i+1}: {repr(event.plaintext)}")
-
-                    # Save the translated subtitles to output file
+                    # Save translated file
                     translated_subs.save(str(output_file))
-                    print(f"🔍 Saved file: {output_file}")
-
+                    logger.info(f"💾 Saved file: {output_file}")
+                    
+                    # Log some sample translations for verification
+                    logger.info("🔍 Translation successful!")
+                    logger.info(f"🔍 Original subs: {len(original_subs)} events")
+                    logger.info(f"🔍 Translated subs: {len(translated_subs)} events")
+                    
+                    # Show first few translations as examples
+                    for j, (orig, trans) in enumerate(zip(original_subs[:3], translated_subs[:3]), 1):
+                        logger.info(f"🔍 Translated line {j}: '{trans.plaintext}'")
+                    
+                    success_count += 1
                     results.append({
                         "original_name": input_file.name,
                         "translated_name": output_file.name,
                         "success": True,
                         "download_url": f"/download/{output_file.name}",
-                        "service": translator
+                        "service": translator,
+                        "lines_translated": len(translated_subs)
                     })
-                    success_count += 1
                 else:
-                    error_msg = "Translation failed - no result returned"
-                    print(f"🔍 Translation failed: {error_msg}")
-                    print(f"🔍 Result: {result}")
-                    logger.error(f"Translation failed for {input_file}: {error_msg}")
+                    logger.error(f"❌ Translation failed for {input_file.name}: No result returned")
                     results.append({
                         "original_name": input_file.name,
                         "success": False,
-                        "error": error_msg,
+                        "error": "Translation failed - no result returned",
                         "service": translator
                     })
 
             except Exception as e:
-                logger.error(f"Error processing {input_file}: {e}")
+                logger.error(f"❌ Error processing {input_file.name}: {e}")
+                import traceback
+                logger.error(f"❌ Traceback: {traceback.format_exc()}")
                 results.append({
                     "original_name": input_file.name,
                     "success": False,
